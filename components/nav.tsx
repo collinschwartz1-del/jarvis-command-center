@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { LogOut } from "lucide-react";
 
 const LINKS = [
   { href: "/", label: "Core" },
@@ -47,6 +48,13 @@ export function Nav() {
               </Link>
             );
           })}
+          <a
+            href="/auth/signout"
+            title="Sign out"
+            className="ml-2 rounded px-2 py-1.5 text-muted transition-colors hover:bg-panel-2 hover:text-text"
+          >
+            <LogOut size={15} />
+          </a>
         </nav>
       </div>
     </header>
