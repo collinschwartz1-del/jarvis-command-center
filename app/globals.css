@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0a0907;          /* warm near-black */
+  --panel: #14110c;
+  --panel-2: #1c1810;
+  --border: #2c2619;
+  --border-bright: #463c26;
+  --text: #f1ece3;        /* warm white */
+  --muted: #9d9079;       /* warm gray */
+  --accent: #fbbf24;      /* amber-400 */
+  --accent-deep: #b45309; /* amber-700 */
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-border: var(--border);
+  --color-border-bright: var(--border-bright);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Mission Control backdrop: warm grid + a pronounced amber glow from the top */
+body {
+  font-family: var(--font-sans);
+  background-image:
+    radial-gradient(1000px 480px at 50% -140px, rgba(251, 191, 36, 0.12), transparent 72%),
+    linear-gradient(to right, rgba(251, 191, 36, 0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(251, 191, 36, 0.022) 1px, transparent 1px);
+  background-size: 100% 100%, 48px 48px, 48px 48px;
+  background-attachment: fixed;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #2f2818; border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* pulsing status dot — bigger, warmer halo */
+.dot-pulse {
+  box-shadow: 0 0 8px 1px rgba(251, 191, 36, 0.7);
+  animation: dotpulse 2.2s ease-out infinite;
+}
+@keyframes dotpulse {
+  0% { box-shadow: 0 0 6px 0 rgba(251, 191, 36, 0.7); }
+  70% { box-shadow: 0 0 6px 9px rgba(251, 191, 36, 0); }
+  100% { box-shadow: 0 0 6px 0 rgba(251, 191, 36, 0); }
+}
+
+/* the signature metric tile: bright amber top rule + ambient glow */
+.tile {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(251, 191, 36, 0.06), transparent 42%),
+    var(--panel);
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+.tile::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.7;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.6);
+  transition: opacity 0.2s;
+}
+.tile:hover {
+  border-color: var(--border-bright);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px -12px rgba(251, 191, 36, 0.25);
+}
+.tile:hover::before { opacity: 1; }
+
+.accent-glow { text-shadow: 0 0 22px rgba(251, 191, 36, 0.6), 0 0 4px rgba(251, 191, 36, 0.4); }
+
+/* corner ticks for the command-center frame feel */
+.ticked { position: relative; }
+.ticked::after {
+  content: "";
+  position: absolute;
+  top: 8px; right: 8px;
+  width: 6px; height: 6px;
+  border-top: 1px solid var(--border-bright);
+  border-right: 1px solid var(--border-bright);
+}
