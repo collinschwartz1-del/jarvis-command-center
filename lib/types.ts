@@ -202,3 +202,131 @@ export interface Activity {
   ref_id: string | null;
   summary: string;
 }
+
+// ---------- LLS (Liquid Lending Solutions) — migration 0002 ----------
+
+// Full Lendr dashboard-stats payload kept on lls_snapshot.raw. Typed loosely
+// (Record) for the bits we render directly; the API returns far more.
+export interface LlsRawStats {
+  pipeline_value?: {
+    total_value: number;
+    loan_count: number;
+    breakdown: {
+      name: string;
+      slug: string;
+      color: string;
+      total_value: string;
+      loan_count: number;
+    }[];
+  };
+  pipeline_vs_payoffs?: {
+    inflow_total: number;
+    inflow_count: number;
+    outflow_total: number;
+    outflow_count: number;
+    net: number;
+    timeline: {
+      loan_id: number;
+      date_iso: string;
+      date_label: string;
+      address: string;
+      city: string;
+      state: string;
+      type: "payoff" | "origination";
+      stage: string | null;
+      amount: number;
+      signed_amount: number;
+    }[];
+    window_start?: string;
+    window_end?: string;
+  };
+  concentration_risk?: {
+    first_name: string;
+    last_name: string;
+    total_amount: string;
+    percentage: number;
+  }[];
+  lender_earnings?: Record<
+    string,
+    { year: number; month: number; earned: number; projected: number }
+  >;
+  portfolio_arltv?: number | null;
+  past_maturity?: { count: number; total: number };
+  computed_at?: string;
+  [key: string]: unknown;
+}
+
+export interface LlsSnapshot {
+  id: string;
+  captured_at: string;
+  available_capital: number | null;
+  outstanding_capital: number | null;
+  total_capital: number | null;
+  aged_receivables: number | null;
+  portfolio_ltv: number | null;
+  avg_monthly_interest: number | null;
+  unique_borrowers: number | null;
+  active_loan_count: number | null;
+  pipeline_value: number | null;
+  pipeline_count: number | null;
+  payoffs_30d_total: number | null;
+  payoffs_30d_count: number | null;
+  originations_30d_total: number | null;
+  originations_30d_count: number | null;
+  raw: LlsRawStats;
+  created_at: string;
+}
+
+export interface LlsLoan {
+  lendr_id: string;
+  borrower_name: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  amount: number | null;
+  outstanding_principal: number | null;
+  status: string | null;
+  stage: string | null;
+  lien_position: string | null;
+  property_type: string | null;
+  rate: number | null;
+  origination_date: string | null;
+  payoff_date: string | null;
+  loan_type: "active" | "pipeline";
+  updated_at: string;
+}
+
+export interface LlsLoanComment {
+  lendr_comment_id: string;
+  loan_id: string;
+  author: string | null;
+  body: string;
+  created_at: string;
+  synced_at: string;
+}
+
+export interface LlsInboxItem {
+  gmail_message_id: string;
+  gmail_thread_id: string;
+  from_name: string | null;
+  from_email: string | null;
+  subject: string | null;
+  snippet: string | null;
+  body: string | null;
+  received_at: string | null;
+  category: string | null;
+  request_summary: string | null;
+  priority: number;
+  matched_loan_id: string | null;
+  handled: boolean;
+  updated_at: string;
+}
+
+export interface LlsReport {
+  period: string;
+  drive_file_id: string | null;
+  web_view_link: string | null;
+  title: string | null;
+  generated_at: string;
+}

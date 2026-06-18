@@ -11,6 +11,11 @@ import type {
   DealAnalysis,
   Property,
   PortfolioSummary,
+  LlsSnapshot,
+  LlsLoan,
+  LlsLoanComment,
+  LlsInboxItem,
+  LlsReport,
 } from "./types";
 
 export async function getAgents(): Promise<Agent[]> {
@@ -80,7 +85,12 @@ export async function getEmailBriefs(): Promise<EmailBrief[]> {
     .from("email_briefs")
     .select("*")
     .order("latest_at", { ascending: false });
-  return data ?? [];
+  // action_items is a JSONB column and can come back null; normalize to an
+  // array so every render site (.filter/.map/.length) is safe.
+  return (data ?? []).map((b) => ({
+    ...b,
+    action_items: Array.isArray(b.action_items) ? b.action_items : [],
+  }));
 }
 
 export async function getProperties(company = "pgo"): Promise<Property[]> {
@@ -108,6 +118,65 @@ export async function getActivity(limit = 12): Promise<Activity[]> {
     .from("activity")
     .select("*")
     .order("at", { ascending: false })
+    .limit(limit);
+  return data ?? [];
+}
+
+// ---------- LLS (Liquid Lending Solutions) ----------
+
+// Newest fund snapshot = current state.
+export async function getLlsSnapshot(): Promise<LlsSnapshot | null> {
+  const { data } = await supabaseAdmin()
+    .from("lls_snapshot")
+    .select("*")
+    .order("captured_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data ?? null;
+}
+
+export async function getLlsLoans(
+  type?: "active" | "pipeline"
+): Promise<LlsLoan[]> {
+  let q = supabaseAdmin().from("lls_loans").select("*");
+  if (type) q = q.eq("loan_type", type);
+  const { data } = await q.order("payoff_date", {
+    ascending: true,
+    nullsFirst: false,
+  });
+  return data ?? [];
+}
+
+export async function getLlsInbox(): Promise<LlsInboxItem[]> {
+  const { data } = await supabaseAdmin()
+    .from("lls_inbox")
+    .select("*")
+    .order("priority", { ascending: false })
+    .order("received_at", { ascending: false });
+  return data ?? [];
+}
+
+// Comments for the loans referenced by inbox items, grouped by loan id.
+export async function getLlsCommentsByLoan(
+  loanIds: string[]
+): Promise<Record<string, LlsLoanComment[]>> {
+  const ids = loanIds.filter(Boolean);
+  if (!ids.length) return {};
+  const { data } = await supabaseAdmin()
+    .from("lls_loan_comments")
+    .select("*")
+    .in("loan_id", ids)
+    .order("created_at", { ascending: false });
+  const out: Record<string, LlsLoanComment[]> = {};
+  for (const c of data ?? []) (out[c.loan_id] ??= []).push(c as LlsLoanComment);
+  return out;
+}
+
+export async function getLlsReports(limit = 12): Promise<LlsReport[]> {
+  const { data } = await supabaseAdmin()
+    .from("lls_reports")
+    .select("*")
+    .order("period", { ascending: false })
     .limit(limit);
   return data ?? [];
 }

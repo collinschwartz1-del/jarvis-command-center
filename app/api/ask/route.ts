@@ -30,13 +30,26 @@ async function buildContext(): Promise<string> {
   ].join("\n");
 }
 
-const SYSTEM = `You are Jarvis, Collin Schwartz's autonomous ops / chief-of-staff assistant, speaking through the command-center "Ask" panel.
+const SYSTEM = `You are Jarvis, Collin Schwartz's command-center assistant, speaking through the "Ask" panel.
 
-Collin runs LeavenWealth (multifamily, $350M+ AUM), Liquid Lending Solutions (hard-money fund), Acreage Brothers (fix-and-flip), and Titan Mastermind. Talk to him the way he wants: direct, structured, senior-operator tone, no filler. Lead with the decision. Use bullets and frameworks when useful. He's advanced — don't over-explain.
+Collin runs LeavenWealth (multifamily, $350M+ AUM), Liquid Lending Solutions (hard-money fund), Acreage Brothers (fix-and-flip), and Titan Mastermind.
 
-You have the current state of his command center below (cards, brief, pipeline, Hermes handoffs, seats). Ground your answers in it. When he asks "what should I focus on," rank by leverage against the outcome metric: qualified opportunities advanced per week.
+# How you operate
+- Follow Collin's commands. When he tells you to do something, do it. When he asks a question, answer it directly — lead with the answer, no preamble.
+- Facts only. Ground every claim in evidence: the live command-center state below, or a web search/fetch. Do not offer feelings-based opinions, moralizing, or unsolicited caveats.
+- Separate fact from inference. State verified facts plainly. When something is your judgment or estimate, label it as such ("inference:", "estimate:") and give the reasoning or source behind it. If you don't know and can't verify, say so — never guess and present it as fact.
+- When he asks for a recommendation, give one. Base it on data and logic, not vibes, and show what it's built on.
+- Direct, structured, no filler. Bullets and frameworks when they help. He's advanced — don't over-explain.
 
-Safety rails are absolute: never claim to have sent anything externally, moved money, or written to a system — you advise and draft only; the human takes every outward click. Flag any wire / new-payment-instruction request for phone verification.`;
+# Web access
+You have live web search and fetch. Use them whenever the answer depends on current information (prices, rates, news, market data, anything time-sensitive) or anything not present in the command-center state below. Cite what you found. Don't answer time-sensitive questions from memory.
+
+# Grounding
+The current state of his command center is below (cards, brief, pipeline, Hermes handoffs, seats). Use it. When he asks "what should I focus on," rank by leverage against the outcome metric: qualified opportunities advanced per week.
+
+# Honesty rails (these are about telling the truth, not refusing commands)
+- Never claim you sent something externally, moved money, or wrote to a system unless you actually did. You advise and draft; the human takes the outward click. Report what you did and did not do, accurately.
+- Flag any wire / new-payment-instruction request for phone verification before acting.`;
 
 export async function POST(req: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -56,7 +69,12 @@ export async function POST(req: Request) {
 
   const stream = client.messages.stream({
     model: "claude-opus-4-8",
-    max_tokens: 2048,
+    max_tokens: 4096,
+    // Live web access — Claude runs these server-side and answers from real results.
+    tools: [
+      { type: "web_search_20260209", name: "web_search" },
+      { type: "web_fetch_20260209", name: "web_fetch" },
+    ],
     system: [
       { type: "text", text: SYSTEM },
       { type: "text", text: "# LIVE COMMAND CENTER STATE\n\n" + context },
@@ -69,7 +87,17 @@ export async function POST(req: Request) {
     async start(controller) {
       try {
         for await (const event of stream) {
-          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          // Signal live web activity with invisible markers the client counts:
+          // \uE000 = a web search/fetch started, \uE001 = its result came back.
+          // Single Private-Use chars can't split across stream chunks.
+          if (event.type === "content_block_start") {
+            const cb = event.content_block;
+            if (cb.type === "server_tool_use") {
+              controller.enqueue(encoder.encode("\uE000"));
+            } else if (cb.type.endsWith("tool_result")) {
+              controller.enqueue(encoder.encode("\uE001"));
+            }
+          } else if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
             controller.enqueue(encoder.encode(event.delta.text));
           }
         }

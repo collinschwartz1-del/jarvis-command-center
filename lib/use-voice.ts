@@ -139,9 +139,17 @@ export function useSpeech() {
   }, []);
 
   const stopAudio = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = "";
+    const a = audioRef.current;
+    if (a) {
+      // Detach handlers BEFORE clearing src: setting src="" fires an `error`
+      // event, which would otherwise trigger the browser-voice fallback and
+      // play a second (stock) voice over the next clip.
+      a.onended = null;
+      a.onerror = null;
+      a.pause();
+      const url = a.src;
+      a.src = "";
+      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
       audioRef.current = null;
     }
   }, []);
@@ -198,7 +206,11 @@ export function useSpeech() {
         const audio = new Audio(URL.createObjectURL(blob));
         audioRef.current = audio;
         audio.onended = () => setSpeaking(false);
-        audio.onerror = () => browserSpeak(clean);
+        // Only fall back if this is still the current generation — a stale
+        // error (e.g. from an intentional stop) must not start a 2nd voice.
+        audio.onerror = () => {
+          if (gen === genRef.current) browserSpeak(clean);
+        };
         await audio.play();
       } catch {
         if (gen === genRef.current) browserSpeak(clean);

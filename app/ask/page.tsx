@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Send, Mic, Volume2, VolumeX } from "lucide-react";
+import { Send, Mic, Volume2, VolumeX, Globe } from "lucide-react";
 import { PageHeader } from "@/components/ui";
 import { useSpeechRecognition, useSpeech } from "@/lib/use-voice";
 
@@ -11,6 +11,7 @@ export default function AskPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [voiceOut, setVoiceOut] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const voiceOutRef = useRef(voiceOut);
@@ -30,6 +31,7 @@ export default function AskPage() {
     setMessages([...next, { role: "assistant", content: "" }]);
     setInput("");
     setBusy(true);
+    setSearching(false);
 
     try {
       const res = await fetch("/api/ask", {
@@ -55,16 +57,24 @@ export default function AskPage() {
         const { done, value } = await reader.read();
         if (done) break;
         acc += decoder.decode(value, { stream: true });
+        // Web-activity markers (\uE000 start / \uE001 end) are counted to show a
+        // "searching" chip, then stripped from the visible/spoken answer.
+        const opens = (acc.match(/\uE000/g) ?? []).length;
+        const closes = (acc.match(/\uE001/g) ?? []).length;
+        setSearching(opens > closes);
+        const clean = acc.replace(/[\uE000\uE001]/g, "");
         setMessages((m) => {
           const copy = [...m];
-          copy[copy.length - 1] = { role: "assistant", content: acc };
+          copy[copy.length - 1] = { role: "assistant", content: clean };
           return copy;
         });
         scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
       }
-      if (voiceOutRef.current && acc.trim()) speech.speak(acc);
+      const finalText = acc.replace(/[\uE000\uE001]/g, "");
+      if (voiceOutRef.current && finalText.trim()) speech.speak(finalText);
     } finally {
       setBusy(false);
+      setSearching(false);
     }
   }
 
@@ -106,7 +116,12 @@ export default function AskPage() {
                     : "border border-border bg-panel-2 text-zinc-200"
                 }`}
               >
-                {m.content || (busy ? "…" : "")}
+                {m.role === "assistant" && i === messages.length - 1 && searching && (
+                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-accent">
+                    <Globe size={13} className="animate-pulse" /> Searching the web…
+                  </div>
+                )}
+                {m.content || (busy && !searching ? "…" : "")}
               </div>
             </div>
           ))}

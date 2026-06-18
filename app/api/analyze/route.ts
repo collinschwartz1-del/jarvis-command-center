@@ -16,7 +16,11 @@ Screen against LW benchmarks:
 - Value-add levers: interior renos, RUBS, PM improvements, lease trade-outs, amenities.
 - Deal breakers: crime-heavy submarkets, structural issues, major supply pipeline, econ occ < 85% w/ no recovery, expense ratio > 55% w/o mitigation.
 
-Produce a Preliminary LW Fit Score (0–10); 7+ moves to deeper underwriting. Be honest — most broker deals are priced to market and will not clear the 8% in-place cap target. If the financials are not provided, screen on what's available and say exactly which docs are needed (T-12, rent roll, OM).`;
+Produce a Preliminary LW Fit Score (0–10); 7+ moves to deeper underwriting. Be honest — most broker deals are priced to market and will not clear the 8% in-place cap target. If the financials are not provided, screen on what's available and say exactly which docs are needed (T-12, rent roll, OM).
+
+Facts only: ground every number in the provided documents or a cited source. Never invent figures. If a metric isn't in the docs and can't be sourced, set it null and name the doc needed — do not estimate into a required number field. Distinguish what the docs state from your own inference; flag assumptions plainly in the notes.
+
+You have live web search and fetch. Use them to pull current market data that sharpens the screen — submarket cap rates, rent comps, supply/permitting pipeline, crime and economic-occupancy context, comparable sales. Prefer recent sources and ground claims in what you find.`;
 
 const SCHEMA = {
   type: "object",
@@ -81,15 +85,12 @@ export async function POST(req: Request) {
   }
 
   const client = new Anthropic({ apiKey });
-  const msg = await client.messages.create({
-    model: "claude-opus-4-8",
-    max_tokens: 4096,
-    system: LW_SYSTEM,
-    output_config: { format: { type: "json_schema", schema: SCHEMA } },
-    messages: [
-      {
-        role: "user",
-        content: `Run the LW preliminary underwriting screen on this deal.
+
+  // Conversation seed; we may loop if a server-tool turn pauses (pause_turn).
+  const convo: Anthropic.MessageParam[] = [
+    {
+      role: "user",
+      content: `Run the LW preliminary underwriting screen on this deal.
 
 Deal: ${dealName}
 Address: ${address ?? "(unknown)"}
@@ -97,12 +98,34 @@ Source: ${source ?? "(unknown)"}
 
 Documents / data provided:
 ${docText?.slice(0, 120000) ?? "(none — screen on the header data above and list the docs needed)"}`,
-      },
-    ],
-  });
+    },
+  ];
 
-  const text = msg.content.find((b) => b.type === "text");
-  const parsed = JSON.parse(text && "text" in text ? text.text : "{}");
+  // Stream (avoids HTTP timeouts while web search runs) and continue across any
+  // pause_turn from the server-side tool loop, up to a small bound.
+  let msg;
+  for (let i = 0; i < 4; i++) {
+    const stream = client.messages.stream({
+      model: "claude-opus-4-8",
+      max_tokens: 4096,
+      // Live web access for current market data (cap rates, comps, supply pipeline, submarket).
+      tools: [
+        { type: "web_search_20260209", name: "web_search" },
+        { type: "web_fetch_20260209", name: "web_fetch" },
+      ],
+      system: LW_SYSTEM,
+      output_config: { format: { type: "json_schema", schema: SCHEMA } },
+      messages: convo,
+    });
+    msg = await stream.finalMessage();
+    if (msg.stop_reason !== "pause_turn") break;
+    convo.push({ role: "assistant", content: msg.content });
+  }
+
+  // The schema-conforming JSON is the final text block (after any tool turns).
+  const textBlocks = (msg?.content ?? []).filter((b) => b.type === "text");
+  const last = textBlocks[textBlocks.length - 1];
+  const parsed = JSON.parse(last && "text" in last ? last.text : "{}");
 
   const ppu =
     parsed.price && parsed.units ? Math.round(parsed.price / parsed.units) : null;
