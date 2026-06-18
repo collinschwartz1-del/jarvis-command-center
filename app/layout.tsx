@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/nav";
@@ -19,6 +19,18 @@ const mono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Jarvis Command Center",
   description: "The face on the Jarvis ops brain.",
+  appleWebApp: {
+    capable: true,
+    title: "Jarvis",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0a0907",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

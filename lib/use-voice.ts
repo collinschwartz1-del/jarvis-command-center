@@ -122,37 +122,89 @@ export function useSpeechRecognition(opts: {
 
 // ---------------------------------------------------------------------------
 // Speech output (text-to-speech) — Jarvis reads replies aloud.
+// Prefers server-side ElevenLabs (/api/tts) for a natural voice; falls back to
+// the browser's built-in speech synthesis when TTS isn't configured (503) or
+// the request fails.
 // ---------------------------------------------------------------------------
 export function useSpeech() {
   const [supported, setSupported] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Bumped on every cancel() so a slow in-flight TTS fetch can detect it's stale.
+  const genRef = useRef(0);
 
   useEffect(() => {
-    setSupported(typeof window !== "undefined" && "speechSynthesis" in window);
+    // Either path counts as supported; ElevenLabs works even without speechSynthesis.
+    setSupported(typeof window !== "undefined");
+  }, []);
+
+  const stopAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
   }, []);
 
   const cancel = useCallback(() => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
+    genRef.current += 1;
+    stopAudio();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
     setSpeaking(false);
+  }, [stopAudio]);
+
+  const browserSpeak = useCallback((clean: string) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setSpeaking(false);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(clean);
+    u.lang = "en-US";
+    u.rate = 1.05;
+    u.pitch = 1;
+    u.onend = () => setSpeaking(false);
+    u.onerror = () => setSpeaking(false);
+    setSpeaking(true);
+    window.speechSynthesis.speak(u);
   }, []);
 
   const speak = useCallback(
-    (text: string) => {
-      if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    async (text: string) => {
+      if (typeof window === "undefined") return;
       const clean = text.replace(/[*_`#>]/g, "").trim();
       if (!clean) return;
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(clean);
-      u.lang = "en-US";
-      u.rate = 1.05;
-      u.pitch = 1;
-      u.onend = () => setSpeaking(false);
-      u.onerror = () => setSpeaking(false);
+
+      cancel(); // stop anything already playing; bumps genRef
+      const gen = genRef.current;
       setSpeaking(true);
-      window.speechSynthesis.speak(u);
+
+      try {
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: clean }),
+        });
+        if (gen !== genRef.current) return; // cancelled while fetching
+        if (!res.ok) {
+          // 503 = not configured, anything else = failure → browser fallback
+          browserSpeak(clean);
+          return;
+        }
+        const blob = await res.blob();
+        if (gen !== genRef.current) return;
+        const audio = new Audio(URL.createObjectURL(blob));
+        audioRef.current = audio;
+        audio.onended = () => setSpeaking(false);
+        audio.onerror = () => browserSpeak(clean);
+        await audio.play();
+      } catch {
+        if (gen === genRef.current) browserSpeak(clean);
+      }
     },
-    []
+    [cancel, browserSpeak]
   );
 
   return { supported, speaking, speak, cancel };
