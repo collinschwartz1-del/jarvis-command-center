@@ -11,7 +11,7 @@ export default async function InboxPage() {
   const people = briefs.length;
   const threads = briefs.reduce((n, b) => n + b.thread_count, 0);
   const openActions = briefs.reduce(
-    (n, b) => n + b.action_items.filter((a) => !a.done).length,
+    (n, b) => n + (b.action_items ?? []).filter((a) => !a.done).length,
     0
   );
 

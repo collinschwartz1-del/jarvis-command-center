@@ -22,7 +22,8 @@ const MAILBOX: Record<string, string> = {
 
 export function EmailBriefCard({ brief }: { brief: EmailBrief }) {
   const [pending, start] = useTransition();
-  const openCount = brief.action_items.filter((a) => !a.done).length;
+  const actionItems = brief.action_items ?? [];
+  const openCount = actionItems.filter((a) => !a.done).length;
 
   return (
     <div className="ticked rounded-lg border border-border bg-panel p-5">
@@ -75,13 +76,13 @@ export function EmailBriefCard({ brief }: { brief: EmailBrief }) {
         </div>
       )}
 
-      {brief.action_items.length > 0 && (
+      {actionItems.length > 0 && (
         <div className="mt-4 rounded border border-border bg-panel-2 p-3">
           <div className="font-mono text-[10px] uppercase tracking-widest text-accent/80">
             Action Items
           </div>
           <ul className="mt-2 space-y-1.5">
-            {brief.action_items.map((a, i) => (
+            {actionItems.map((a, i) => (
               <li key={i}>
                 <button
                   disabled={pending}
