@@ -3,6 +3,8 @@ import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/nav";
 import { StatusRibbon } from "@/components/status-ribbon";
+import { RoleProvider } from "@/components/role-context";
+import { currentRole } from "@/lib/auth";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -33,17 +35,20 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const canWrite = (await currentRole()) === "owner";
   return (
     <html lang="en" className={`${display.variable} ${mono.variable}`}>
       <body>
-        <StatusRibbon />
-        <Nav />
-        <main className="mx-auto max-w-6xl px-6 py-10">{children}</main>
+        <RoleProvider canWrite={canWrite}>
+          <StatusRibbon />
+          <Nav />
+          <main className="mx-auto max-w-6xl px-6 py-10">{children}</main>
+        </RoleProvider>
       </body>
     </html>
   );

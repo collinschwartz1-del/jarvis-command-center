@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireOwner } from "@/lib/auth";
+import { gmailToken, writeGmailDraft } from "@/lib/gmail";
 import type { CardStatus } from "@/lib/types";
 
 // Phase 3 + 4 — write card decisions back to BOTH Supabase and the markdown
@@ -48,10 +50,12 @@ async function setCardStatus(id: string, status: CardStatus, kind: string) {
 }
 
 export async function approveCard(id: string) {
+  await requireOwner();
   await setCardStatus(id, "approved", "card_approved");
 }
 
 export async function dismissCard(id: string) {
+  await requireOwner();
   await setCardStatus(id, "dismissed", "card_dismissed");
 }
 
@@ -63,6 +67,7 @@ export async function routeToFlipTracker(
   price: number | null,
   source?: string
 ) {
+  await requireOwner();
   const db = supabaseAdmin();
   await db.from("deal_analyses").insert({
     deal_name: dealName,
@@ -84,8 +89,95 @@ export async function routeToFlipTracker(
   revalidatePath("/sales");
 }
 
+// Approve a prepopulated reply from the /replies queue. Collin picks ONE variant
+// (optionally edited inline); we write it as a Gmail DRAFT on the thread — never
+// sends — then mark the row approved. Final send stays a human action in Gmail.
+export async function approveReply(
+  draftId: string,
+  chosenIndex: number,
+  editedBody?: string
+) {
+  await requireOwner();
+  const db = supabaseAdmin();
+
+  const { data: row } = await db
+    .from("email_drafts")
+    .select("*")
+    .eq("id", draftId)
+    .maybeSingle();
+  if (!row) throw new Error("Reply draft not found.");
+
+  const variants = Array.isArray(row.variants) ? row.variants : [];
+  const picked = variants[chosenIndex];
+  const body = (editedBody ?? picked?.body ?? row.draft_body ?? "").trim();
+  if (!body) throw new Error("No reply body to approve.");
+  if (!row.gmail_thread_id || !row.person_email) {
+    throw new Error("Reply draft is missing the Gmail thread/recipient.");
+  }
+
+  const token = await gmailToken();
+  if (!token) {
+    throw new Error(
+      "Gmail isn't connected (GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN). Run npm run gmail-auth."
+    );
+  }
+  const gmailDraftId = await writeGmailDraft(
+    token,
+    {
+      thread_id: row.gmail_thread_id,
+      to_email: row.person_email,
+      subject: row.subject ?? "",
+      in_reply_to: row.reply_to_message_id ?? null,
+      references: row.reply_references ?? null,
+    },
+    body
+  );
+
+  await db
+    .from("email_drafts")
+    .update({
+      status: "approved",
+      chosen_index: chosenIndex,
+      draft_body: body,
+      gmail_draft_id: gmailDraftId,
+      written_at: new Date().toISOString(),
+    })
+    .eq("id", draftId);
+
+  await db.from("activity").insert({
+    actor: "collin",
+    kind: "reply_approved",
+    ref_table: "email_drafts",
+    ref_id: draftId,
+    summary: `Reply to ${row.person_name ?? row.person_email} → Gmail draft staged`,
+  });
+
+  revalidatePath("/replies");
+}
+
+// Dismiss a reply draft from the queue without staging anything.
+export async function dismissReply(draftId: string) {
+  await requireOwner();
+  const db = supabaseAdmin();
+  const { data: row } = await db
+    .from("email_drafts")
+    .select("person_name, person_email")
+    .eq("id", draftId)
+    .maybeSingle();
+  await db.from("email_drafts").update({ status: "dismissed" }).eq("id", draftId);
+  await db.from("activity").insert({
+    actor: "collin",
+    kind: "reply_dismissed",
+    ref_table: "email_drafts",
+    ref_id: draftId,
+    summary: `Dismissed reply to ${row?.person_name ?? row?.person_email ?? draftId}`,
+  });
+  revalidatePath("/replies");
+}
+
 // Toggle a single email action item's done state.
 export async function toggleActionItem(briefId: string, index: number) {
+  await requireOwner();
   const db = supabaseAdmin();
   const { data } = await db
     .from("email_briefs")

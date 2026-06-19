@@ -8,6 +8,8 @@ import type {
   Metric,
   Activity,
   EmailBrief,
+  EmailDraft,
+  DraftVariant,
   DealAnalysis,
   Property,
   PortfolioSummary,
@@ -80,6 +82,15 @@ export async function getDealAnalyses(): Promise<DealAnalysis[]> {
   return data ?? [];
 }
 
+export async function getDealAnalysis(id: string): Promise<DealAnalysis | null> {
+  const { data } = await supabaseAdmin()
+    .from("deal_analyses")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  return data ?? null;
+}
+
 export async function getEmailBriefs(): Promise<EmailBrief[]> {
   const { data } = await supabaseAdmin()
     .from("email_briefs")
@@ -91,6 +102,43 @@ export async function getEmailBriefs(): Promise<EmailBrief[]> {
     ...b,
     action_items: Array.isArray(b.action_items) ? b.action_items : [],
   }));
+}
+
+// Reply drafts for the /replies approval queue — every reply-needed thread that's
+// awaiting Collin. Includes 'pending' (Sue cleared >=1 option) and 'held' (Sue
+// flagged every option) so Collin always has a reply to start from; the card
+// surfaces Sue's caution on held variants. Newest first. Normalizes variants to
+// an array (jsonb can come back null) and, for legacy single-draft rows written
+// before the variants migration, synthesizes a one-entry variant from draft_body.
+export async function getPendingReplies(): Promise<EmailDraft[]> {
+  const { data } = await supabaseAdmin()
+    .from("email_drafts")
+    .select("*")
+    .in("status", ["pending", "held"])
+    .order("created_at", { ascending: false });
+  // The drafter inserts one row per run, so a thread can have several rows across
+  // days. Keep only the newest per thread (rows are already newest-first).
+  const seen = new Set<string>();
+  const latest = (data ?? []).filter((d) => {
+    const key = d.gmail_thread_id ?? d.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return latest.map((d) => {
+    let variants: DraftVariant[] = Array.isArray(d.variants) ? d.variants : [];
+    if (!variants.length && d.draft_body) {
+      variants = [
+        {
+          label: "Reply",
+          body: d.draft_body,
+          verdict: d.sue_verdict === "hold" ? "hold" : "approve",
+          note: d.sue_note ?? null,
+        },
+      ];
+    }
+    return { ...d, variants } as EmailDraft;
+  });
 }
 
 export async function getProperties(company = "pgo"): Promise<Property[]> {

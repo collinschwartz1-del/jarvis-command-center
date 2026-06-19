@@ -7,9 +7,11 @@ import { LogOut } from "lucide-react";
 const LINKS = [
   { href: "/", label: "Core" },
   { href: "/inbox", label: "Inbox" },
+  { href: "/replies", label: "Replies" },
   { href: "/agents", label: "Agents" },
   { href: "/projects", label: "Projects" },
   { href: "/sales", label: "Sales" },
+  { href: "/texts", label: "Texts" },
   { href: "/lending", label: "LLS" },
   { href: "/bridge", label: "Bridge" },
   { href: "/ask", label: "Ask" },

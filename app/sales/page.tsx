@@ -33,7 +33,7 @@ export default async function SalesPage() {
         {analyses.length ? (
           <div className="grid gap-4">
             {analyses.map((a) => (
-              <AnalysisCard key={a.id} a={a} />
+              <AnalysisCard key={a.id} a={a} href={`/sales/${a.id}`} />
             ))}
           </div>
         ) : (

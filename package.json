@@ -9,6 +9,7 @@
     "lint": "next lint",
     "sync": "node scripts/sync.mjs",
     "intel": "node scripts/intel.mjs",
+    "draft-replies": "node scripts/draft-replies.mjs",
     "lls-sync": "node scripts/lls-sync.mjs",
     "lls-report": "node scripts/lls-monthly-report.mjs",
     "gmail-auth": "node scripts/gmail-auth.mjs",

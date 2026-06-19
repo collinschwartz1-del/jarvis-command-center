@@ -115,6 +115,45 @@ export interface EmailBrief {
   updated_at: string;
 }
 
+// One prepopulated reply option. Single-reply threads have exactly one variant;
+// decision threads (yes/no, and/or) have 2-3, each Sue-reviewed independently.
+export interface DraftVariant {
+  label: string; // e.g. "Reply", "Yes / accept", "No / decline", "Option A"
+  body: string; // the full reply in Collin's voice
+  verdict: "approve" | "hold";
+  note: string | null; // Sue's reasoning when held
+}
+
+export type DraftStatus =
+  | "pending" // >=1 variant cleared Sue; awaiting Collin's pick in /replies
+  | "approved" // Collin picked one; Gmail draft written on the thread
+  | "held" // Sue held every variant
+  | "excluded" // scope gate excluded the thread
+  | "dismissed"; // Collin dismissed it
+
+export interface EmailDraft {
+  id: string;
+  gmail_thread_id: string | null;
+  gmail_msg_id: string | null;
+  gmail_draft_id: string | null;
+  person_name: string;
+  person_email: string;
+  subject: string;
+  category: string; // reply | no-reply-needed (legacy: routine | excluded)
+  excluded_reason: string | null; // caution reason when sensitive
+  sensitivity: "normal" | "sensitive";
+  reply_kind: "single" | "decision";
+  variants: DraftVariant[];
+  chosen_index: number | null;
+  original_snippet: string | null;
+  draft_body: string | null; // legacy single-draft body / chosen body on approve
+  sue_verdict: string;
+  sue_note: string | null;
+  status: string; // DraftStatus, plus legacy drafted/written/sent
+  written_at: string | null;
+  created_at: string;
+}
+
 export interface FitRow {
   metric: string;
   deal: string;

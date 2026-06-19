@@ -4,6 +4,7 @@ import { useTransition } from "react";
 import { Check, Mail } from "lucide-react";
 import type { EmailBrief } from "@/lib/types";
 import { toggleActionItem } from "@/app/actions";
+import { useCanWrite } from "./role-context";
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "";
@@ -22,6 +23,7 @@ const MAILBOX: Record<string, string> = {
 
 export function EmailBriefCard({ brief }: { brief: EmailBrief }) {
   const [pending, start] = useTransition();
+  const canWrite = useCanWrite();
   const actionItems = brief.action_items ?? [];
   const openCount = actionItems.filter((a) => !a.done).length;
 
@@ -85,9 +87,11 @@ export function EmailBriefCard({ brief }: { brief: EmailBrief }) {
             {actionItems.map((a, i) => (
               <li key={i}>
                 <button
-                  disabled={pending}
-                  onClick={() => start(() => toggleActionItem(brief.id, i))}
-                  className="flex w-full items-start gap-2.5 text-left text-sm leading-snug disabled:opacity-50"
+                  disabled={pending || !canWrite}
+                  onClick={() =>
+                    canWrite && start(() => toggleActionItem(brief.id, i))
+                  }
+                  className="flex w-full items-start gap-2.5 text-left text-sm leading-snug disabled:cursor-default disabled:opacity-100"
                 >
                   <span
                     className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${

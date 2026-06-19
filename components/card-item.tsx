@@ -5,10 +5,12 @@ import { Check, X } from "lucide-react";
 import type { Card } from "@/lib/types";
 import { TierBadge, StatusBadge } from "./badges";
 import { approveCard, dismissCard } from "@/app/actions";
+import { useCanWrite } from "./role-context";
 
 export function CardItem({ card }: { card: Card }) {
   const [pending, start] = useTransition();
-  const actionable = card.status === "pending";
+  const canWrite = useCanWrite();
+  const actionable = card.status === "pending" && canWrite;
 
   return (
     <div className="rounded-lg border border-border bg-panel p-4">

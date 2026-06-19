@@ -26,7 +26,17 @@ claude -p "/board" || echo "board pass failed — continuing"
 cd "$CC_DIR"
 node scripts/intel.mjs || echo "intel refresh skipped (see log)"
 
-# 3. Mirror the files into Supabase for the dashboard.
+# 3. Draft routine email replies (Sue review gate) — stages for the dashboard.
+#    Reads the same 48h inbound mail, scope-gates to low-risk routine replies,
+#    drafts in Collin's voice (multiple labeled options for yes/no & either/or
+#    threads), runs the Sue review pass per option, and stages Sue-approved rows
+#    as status 'pending' in email_drafts. Collin picks an option in the Jarvis
+#    /replies tab; the dashboard stages the Gmail draft. Nothing auto-sends, and
+#    this script never writes to Gmail itself. See scripts/draft-replies.mjs.
+cd "$CC_DIR"
+node scripts/draft-replies.mjs || echo "draft-replies skipped (see log)"
+
+# 4. Mirror the files into Supabase for the dashboard.
 cd "$CC_DIR"
 npm run sync
 

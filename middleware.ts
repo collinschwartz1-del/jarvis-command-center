@@ -1,15 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-
-function allowed(): string[] {
-  return (
-    process.env.ALLOWED_EMAILS ??
-    "collinschwartz1@gmail.com,collin@leavenwealth.com"
-  )
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-}
+import { isAllowed } from "@/lib/roles";
 
 // Gate every route (pages + API) behind an authed, allowlisted session.
 // Public: /login and /auth/*.
@@ -36,7 +27,7 @@ export async function middleware(req: NextRequest) {
 
   const path = req.nextUrl.pathname;
   const isPublic = path.startsWith("/login") || path.startsWith("/auth");
-  const ok = user && allowed().includes((user.email ?? "").toLowerCase());
+  const ok = user && isAllowed(user.email);
 
   if (!ok && !isPublic) {
     const url = req.nextUrl.clone();

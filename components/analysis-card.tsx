@@ -1,4 +1,5 @@
-import { Building2, Hammer, AlertTriangle, HelpCircle, FileText } from "lucide-react";
+import Link from "next/link";
+import { Building2, Hammer, AlertTriangle, HelpCircle, FileText, ArrowRight } from "lucide-react";
 import type { DealAnalysis } from "@/lib/types";
 
 function scoreColor(score: number | null): string {
@@ -8,8 +9,9 @@ function scoreColor(score: number | null): string {
   return "text-rose-300 border-rose-500/40 bg-rose-500/10";
 }
 
-export function AnalysisCard({ a }: { a: DealAnalysis }) {
+export function AnalysisCard({ a, href }: { a: DealAnalysis; href?: string }) {
   const isFlip = a.asset_type === "flip";
+  const isStub = !isFlip && a.fit_score == null;
   return (
     <div className="ticked rounded-lg border border-border bg-panel p-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -121,6 +123,16 @@ export function AnalysisCard({ a }: { a: DealAnalysis }) {
           <FileText size={12} className="mt-0.5 shrink-0" />
           {a.docs_status}
         </div>
+      )}
+
+      {href && (
+        <Link
+          href={href}
+          className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-accent transition-colors hover:gap-2.5 hover:text-accent"
+        >
+          {isStub ? "Open & run underwriting" : "Open full analysis"}
+          <ArrowRight size={13} />
+        </Link>
       )}
     </div>
   );

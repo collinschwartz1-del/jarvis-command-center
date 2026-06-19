@@ -47,9 +47,18 @@ Monthly Interest **~$337K**.
 
 ## 5. Monthly report
 ```
-npm run lls-report                 # prior month → PDF in the Drive folder + lls_reports row
+npm run lls-report                 # prior month → Obsidian note + Drive PDF + lls_reports row
 node scripts/lls-monthly-report.mjs 2026-05    # backfill a specific month
 ```
+Writes two artifacts (independent — the note is written even if the PDF step fails):
+- **Obsidian note** → `06-Finance/LLS Reports/<period> - LLS Financial Health.md` (Dataview frontmatter
+  + tables). Override the folder with `LLS_VAULT_DIR` in `.env.local`.
+- **Drive PDF** → the `GDRIVE_LLS_FOLDER_ID` folder (or My Drive root if unset).
+
+> **Drive PDF needs the Drive API enabled** for the Google Cloud project. The OAuth `drive.file`
+> scope is granted, but the API itself must be turned on once at
+> `https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=592531678463`
+> → Enable. Until then the Obsidian note still writes; the PDF link is just null.
 
 ## 6. Cron (alongside the existing `intel` job)
 ```
