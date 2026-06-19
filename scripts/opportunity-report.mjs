@@ -1,20 +1,27 @@
-// Jarvis DAILY OPPORTUNITY REPORT — "source to cash" digest.
+// Jarvis DAILY ACQUISITION OPPORTUNITY REPORT — "source to cash" deal flow.
 //
-// Compiles revenue opportunities from every inbound channel into ONE ranked
-// report, "closest to cash first":
+// Compiles ONLY properties & businesses to PURCHASE or REFINANCE into one
+// ranked report, closest-to-cash first. This is an acquisition pipeline, not a
+// collections report — it does NOT surface LLS loan repayments/payoffs (that is
+// money coming back to the fund, not a deal to acquire). LLS can be re-enabled
+// with OPP_INCLUDE_LLS=1 if ever wanted.
 //
-//   Money owed    → Lendr/LLS (live API): payoffs maturing, past-maturity
-//                   holdovers to collect, draw requests; + MASC tracker payoffs.
-//   Email         → email_briefs + deal_analyses (written upstream by intel.mjs).
-//   Texts/iMessage→ chat.db (last 24h inbound) scanned by a LOCAL Ollama model.
-//                   Raw message text NEVER leaves the Mac — only distilled
-//                   opportunity flags are kept. (Text Intelligence rule.)
-//   Pipelines     → sue/trackers wholesaler + services trackers: warm/proven
-//                   contacts worth a nudge.
+//   Email   → deal_analyses (property deals flagged by intel.mjs) + email_briefs
+//             filtered to acquisition / refinance / business-for-sale intent.
+//   Texts   → chat.db (last 24h inbound) scanned by a LOCAL Ollama model for
+//             property/business for-sale & refi signals. Raw text NEVER leaves
+//             the Mac — only distilled opportunity flags are kept.
+//   Sources → sue/trackers wholesaler pipeline: off-market inventory sources.
+//
+// Ranking (closest-to-cash first):
+//   ready     docs/financials in hand → underwrite / make an offer now
+//   qualified identified deal, needs a couple data points
+//   new       raw inbound lead to qualify
+//   source    a channel to work for inventory (wholesalers)
 //
 // Output:
 //   1. Dated markdown → sue/trackers/opportunities/YYYY-MM-DD.md (+ -latest.md)
-//   2. Emailed digest of the top items to Collin (his own inbox; never to others).
+//   2. Emailed digest of the top items to Collin (his own inbox; never others).
 //
 // NEVER sends to a third party, replies, or moves money. Read + summarize only.
 //
@@ -22,7 +29,7 @@
 // Cron: called by morning-board.sh after intel.mjs + sync.
 
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { createClient } from "@supabase/supabase-js";
@@ -42,8 +49,9 @@ const HOME = homedir();
 const TRACKERS = process.env.OPP_TRACKERS_DIR ||
   join(HOME, "Documents/my-ai-team/sue/trackers");
 const REPORT_TO = process.env.OPP_REPORT_TO || "collinschwartz1@gmail.com";
-const EMAIL_TEXTS = process.env.OPP_EMAIL_TEXTS !== "0"; // include distilled text opps in email
-const SEND_EMAIL = process.env.OPP_SEND_EMAIL !== "0";   // set 0 to skip the email step
+const EMAIL_TEXTS = process.env.OPP_EMAIL_TEXTS !== "0";
+const SEND_EMAIL = process.env.OPP_SEND_EMAIL !== "0";
+const INCLUDE_LLS = process.env.OPP_INCLUDE_LLS === "1"; // off by default
 const TOP_N = Number(process.env.OPP_TOP_N || 12);
 
 const LENDR_BASE = (process.env.LENDR_API_BASE || "").replace(/\/$/, "");
@@ -62,114 +70,39 @@ const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const DAY = 86400e3;
 const now = new Date();
 const todayISO = now.toISOString().slice(0, 10);
-const money = (n) =>
-  n == null ? "" : "$" + Math.round(n).toLocaleString("en-US");
+const money = (n) => (n == null ? "" : "$" + Math.round(n).toLocaleString("en-US"));
 const daysFromNow = (d) => Math.round((new Date(d) - now) / DAY);
 
-// Opportunity stages, ranked closest-to-cash first. Higher weight = nearer cash.
-const STAGE = { owed: 400, closing: 300, lead: 200, nurture: 100 };
-// op = { source, stage, title, who, amount, action, why, urgent?:bool }
+// Acquisition stages, ranked closest-to-cash first.
+const STAGE = { ready: 400, qualified: 300, new: 200, source: 100 };
+// kind: "property" | "business" | "refi"  → icon for the report
+const ICON = { property: "🏢", business: "🏬", refi: "🔄" };
+// op = { source, stage, kind, title, who, amount, action, why, local?, urgent? }
 function score(op) {
   let s = STAGE[op.stage] ?? 100;
-  if (op.urgent) s += 60;
-  // $ tiebreak inside a stage: up to +99 for a $1M+ item (log-scaled).
-  if (op.amount) s += Math.min(99, Math.log10(op.amount + 1) * 16);
+  if (op.urgent) s += 50;
+  if (op.amount) s += Math.min(99, Math.log10(op.amount + 1) * 16); // $ tiebreak
   return s;
 }
 
 const ok = (label, n) => console.log(`opp: ${label}: ${n}`);
-const warn = (label, e) =>
-  console.error(`opp: ${label} failed — ${e?.message || e}`);
+const warn = (label, e) => console.error(`opp: ${label} failed — ${e?.message || e}`);
 
-// ================= SOURCE A: Lendr / LLS (money owed) =================
-async function lendr(path) {
-  if (!LENDR_BASE || !LENDR_KEY) return null;
-  const r = await fetch(`${LENDR_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${LENDR_KEY}`, Accept: "application/json" },
-  });
-  if (!r.ok) throw new Error(`lendr ${path} ${r.status}`);
-  return r.json();
-}
+// Intent matchers — what counts as a thing to BUY or REFINANCE.
+const ACQ_RE = /(for sale|off[- ]?market|wholesale|seller financ|owner financ|assignment|under contract|listing|cap rate|noi|multifamily|duplex|tri-?plex|four-?plex|apartment|portfolio|land deal|business for sale|acquire|acquisition|buy box|distressed|value-?add|deal flow|pocket listing)/i;
+const REFI_RE = /(refinance|refi|cash[- ]?out|recapitaliz|rate-?and-?term|bridge to perm|take-?out loan|new debt|loan maturing.*refi)/i;
+const BIZ_RE = /(business for sale|acquire (a |the )?business|buy(ing)? a (company|business)|SaaS for sale|book of business|seller'?s discretionary|SDE|EBITDA multiple|main street|roll-?up)/i;
+// Exclude money-MOVING noise that isn't a thing to acquire: a loan being paid
+// off, wire-verification, lien releases. These are collections/ops, not deals.
+const EXCLUDE_RE = /(payoff|wire[- ]?verify|wire instruction|wire fraud|remittance|lien release|satisfaction of (mortgage|note)|good-?through|per-?diem)/i;
 
-async function fromLendr() {
-  const ops = [];
-  if (!LENDR_BASE || !LENDR_KEY) { console.log("opp: Lendr creds absent — skipping."); return ops; }
-
-  // Only loans that matured within this window are a fresh "collect/extend"
-  // opportunity. Loans matured longer ago are known holdovers/extensions —
-  // they belong in a portfolio-risk view, not a daily cash digest — so we roll
-  // them into one summary line instead of flooding the report.
-  const PAST_DAYS = Number(process.env.OPP_PAST_MATURITY_DAYS || 60);
-  const loansR = await lendr("/loans");
-  const loans = (loansR?.data || []).filter((l) => l.status === "active");
-  const oldHoldovers = [];
-  for (const l of loans) {
-    const who = l.borrower?.name?.full || l.borrower?.name || "borrower";
-    const addr = [l.address, l.city, l.state].filter(Boolean).join(", ");
-    const amt = num(l.amount);
-    if (l.maturity_date) {
-      const dd = daysFromNow(l.maturity_date);
-      if (dd < 0 && -dd <= PAST_DAYS) {
-        ops.push({
-          source: "LLS", stage: "owed", urgent: true, amount: amt,
-          title: `Past-maturity loan — ${who}`,
-          who, action: `Collect / extend: matured ${-dd}d ago (${l.maturity_date})`,
-          why: `${money(amt)} principal past due${addr ? ` · ${addr}` : ""}. Recent holdover — fastest cash.`,
-        });
-      } else if (dd < 0) {
-        oldHoldovers.push(amt);
-      } else if (dd <= 30) {
-        ops.push({
-          source: "LLS", stage: "owed", amount: amt,
-          title: `Payoff maturing in ${dd}d — ${who}`,
-          who, action: `Confirm payoff timeline / reload capital (matures ${l.maturity_date})`,
-          why: `${money(amt)} returns within 30 days${addr ? ` · ${addr}` : ""}.`,
-        });
-      }
-    }
-  }
-
-  // One rolled-up line for the aged book so it's visible but not noisy.
-  if (oldHoldovers.length) {
-    const tot = oldHoldovers.reduce((s, n) => s + n, 0);
-    ops.push({
-      source: "LLS", stage: "owed", amount: tot, rollup: true,
-      title: `${oldHoldovers.length} aged holdovers (>${PAST_DAYS}d past maturity)`,
-      who: "", action: "Portfolio-risk review — extend, restructure, or foreclose (see LLS dashboard)",
-      why: `${money(tot)} in long-past-maturity principal. Not daily-actionable; tracked for risk.`,
-    });
-  }
-
-  // Pending draw requests = borrower needs funds → keeps the loan performing.
-  try {
-    const draws = await lendr("/draw-requests");
-    const list = Array.isArray(draws?.data) ? draws.data
-      : Array.isArray(draws?.data?.draw_requests) ? draws.data.draw_requests : [];
-    for (const d of list) {
-      const st = String(d.status || "").toLowerCase();
-      if (st && !/(approved|funded|paid|complete|denied|reject)/.test(st)) {
-        ops.push({
-          source: "LLS", stage: "closing", amount: num(d.amount),
-          title: `Draw request pending — ${d.borrower_name || d.loan?.borrower?.name || "borrower"}`,
-          who: d.borrower_name || "borrower",
-          action: `Review & action draw (${money(num(d.amount))}, status: ${d.status})`,
-          why: "Pending draw keeps a loan performing and interest accruing.",
-        });
-      }
-    }
-  } catch (e) { warn("lendr draw-requests", e); }
-
-  ok("LLS opportunities", ops.length);
-  return ops;
-}
-
-// ================= SOURCE B: Email (briefs + deal flags) =================
+// ================= SOURCE: Email (deal flags + acquisition/refi intent) =====
 async function fromEmail() {
   const ops = [];
   if (!db) { console.log("opp: Supabase absent — skipping email."); return ops; }
   const sinceISO = new Date(now - 2 * DAY).toISOString();
 
-  // Deal analyses = inbound real-estate opportunities flagged by intel.mjs.
+  // deal_analyses = real-estate deals flagged by intel.mjs → properties to buy.
   try {
     const { data } = await db
       .from("deal_analyses")
@@ -177,38 +110,46 @@ async function fromEmail() {
       .gte("created_at", sinceISO)
       .order("created_at", { ascending: false });
     for (const d of data || []) {
-      const ready = /attached|complete|received/i.test(d.docs_status || "");
+      // Skip payoffs / wire-verify items — those are repayments, not acquisitions.
+      if (EXCLUDE_RE.test([d.deal_name, d.address, (d.questions || []).join(" ")].filter(Boolean).join(" "))) continue;
+      const ready = /attached|complete|received|in hand/i.test(d.docs_status || "");
       ops.push({
-        source: "Email", stage: ready ? "closing" : "lead",
+        source: "Email", kind: "property",
+        stage: ready ? "ready" : "qualified",
         amount: d.price ? num(d.price) : null,
-        title: `Deal: ${d.deal_name || d.address || "(unnamed)"}`,
+        title: `${d.deal_name || d.address || "(unnamed property)"}`,
         who: d.person_email || "",
         action: ready
-          ? "Underwrite — docs in hand"
-          : `Request docs / qualify (${d.docs_status || "missing financials"})`,
+          ? "Underwrite / make an offer — docs in hand"
+          : `Request financials & qualify (${d.docs_status || "missing financials"})`,
         why: [d.asset_type, d.units ? `${d.units} units` : null, d.address]
-          .filter(Boolean).join(" · ") || "Inbound deal email.",
+          .filter(Boolean).join(" · ") || "Inbound property deal.",
       });
     }
   } catch (e) { warn("deal_analyses", e); }
 
-  // Email briefs with action items = inbound people worth a reply (potential cash).
+  // email_briefs filtered to acquisition / refinance / business-for-sale intent.
   try {
     const { data } = await db
       .from("email_briefs")
       .select("person_name,person_email,summary,action_items,updated_at")
       .gte("updated_at", sinceISO)
       .order("updated_at", { ascending: false });
-    const CASH = /(buy|sell|offer|deal|invest|loan|fund|wire|pay|quote|proposal|contract|close|refer|hire|engage|book|call)/i;
     for (const b of data || []) {
       const items = Array.isArray(b.action_items) ? b.action_items : [];
-      const cashy = CASH.test((b.summary || "") + " " + items.join(" "));
-      if (!cashy) continue;
+      const text = (b.summary || "") + " " + items.join(" ");
+      if (EXCLUDE_RE.test(text)) continue; // payoff / wire-verify ops noise
+      const isRefi = REFI_RE.test(text);
+      const isBiz = BIZ_RE.test(text);
+      const isAcq = ACQ_RE.test(text);
+      if (!isRefi && !isBiz && !isAcq) continue; // only purchase/refi intent
       ops.push({
-        source: "Email", stage: "lead", amount: null,
-        title: `Reply: ${b.person_name || b.person_email}`,
+        source: "Email",
+        kind: isBiz ? "business" : isRefi ? "refi" : "property",
+        stage: "new", amount: null,
+        title: `${b.person_name || b.person_email}`,
         who: b.person_email || "",
-        action: items[0] || "Respond — cash-relevant thread",
+        action: items[0] || (isRefi ? "Evaluate refinance" : "Qualify the deal"),
         why: (b.summary || "").slice(0, 160),
       });
     }
@@ -218,9 +159,9 @@ async function fromEmail() {
   return ops;
 }
 
-// ================= SOURCE C: Texts / iMessage (LOCAL ONLY) =================
+// ================= SOURCE: Texts / iMessage (LOCAL ONLY) =====================
 // Raw text is read from chat.db and fed ONLY to a local Ollama model. Nothing
-// raw is retained or transmitted — we keep only the distilled opportunity flags.
+// raw is retained or transmitted — only distilled opportunity flags are kept.
 async function fromTexts() {
   const ops = [];
   const dbPath = join(HOME, "Library/Messages/chat.db");
@@ -228,7 +169,6 @@ async function fromTexts() {
 
   let rows = [];
   try {
-    // Apple stores message.date as ns since 2001-01-01 (offset 978307200s).
     const sql = `
       SELECT COALESCE(h.id,'?') AS handle, m.text AS text
       FROM message m LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -245,7 +185,6 @@ async function fromTexts() {
   }
   if (!rows.length) { ok("Text opportunities", 0); return ops; }
 
-  // Compact per-handle so the local model sees recent context per contact.
   const byHandle = {};
   for (const r of rows) (byHandle[r.handle] ??= []).push(r.text.replace(/\s+/g, " ").trim());
   const compact = Object.entries(byHandle).slice(0, 40).map(([handle, msgs]) => ({
@@ -253,14 +192,20 @@ async function fromTexts() {
   }));
 
   const prompt =
-`You are a local revenue-opportunity scanner for a real-estate investor & lender.
-Below are recent inbound text messages grouped by sender handle. Identify ONLY
-messages that are a potential SOURCE OF CASH: someone wanting to buy/sell a
-property, an off-market deal, a loan/lending request, money owed or a payment, a
-referral, or a service/consulting inquiry. Ignore personal chatter, spam, 2FA
-codes, and notifications.
+`You are a local DEAL-FLOW scanner for a real-estate investor who BUYS and
+REFINANCES properties and businesses (multifamily, single-family flips, land,
+and operating businesses).
 
-Return STRICT JSON only: {"opps":[{"handle":"<sender>","summary":"<=18 words, no raw quotes","action":"<the next step>"}]}
+From the inbound texts below (grouped by sender), identify ONLY messages that
+are a PROPERTY or BUSINESS to PURCHASE or REFINANCE — e.g. a property for sale,
+an off-market/wholesale deal, a seller wanting to sell, a portfolio, a business
+for sale, or a refinance/recapitalization opportunity.
+
+IGNORE everything else: loan payments owed, personal chatter, spam, 2FA codes,
+notifications, scheduling, and anything not a thing to buy or refinance.
+
+Return STRICT JSON only:
+{"opps":[{"handle":"<sender>","kind":"property|business|refi","summary":"<=18 words, no raw quotes","action":"<the next step>"}]}
 If none, return {"opps":[]}.
 
 DATA:
@@ -282,11 +227,12 @@ ${JSON.stringify(compact)}`;
   }
 
   for (const o of parsed.opps || []) {
+    const kind = ["property", "business", "refi"].includes(o.kind) ? o.kind : "property";
     ops.push({
-      source: "Text", stage: "lead", amount: null, local: true,
-      title: `Text: ${o.handle || "unknown"}`,
+      source: "Text", stage: "new", kind, amount: null, local: true,
+      title: `${o.handle || "unknown"}`,
       who: o.handle || "",
-      action: o.action || "Reply",
+      action: o.action || "Reply & qualify",
       why: o.summary || "",
     });
   }
@@ -294,37 +240,9 @@ ${JSON.stringify(compact)}`;
   return ops;
 }
 
-// ================= SOURCE D: Pipelines (trackers) =================
+// ================= SOURCE: Wholesaler pipeline (inventory channels) ==========
 function fromTrackers() {
   const ops = [];
-
-  // MASC loans — money owed (e.g. HHH3 payoff in progress).
-  try {
-    const f = join(TRACKERS, "masc-loans.md");
-    if (existsSync(f)) {
-      const t = readFileSync(f, "utf8");
-      const re = /###\s+(.+?)\n([\s\S]*?)(?=\n###|\n##\s|$)/g;
-      let m;
-      while ((m = re.exec(t))) {
-        const head = m[1].trim(), body = m[2];
-        const open = /status:\*\*\s*OPEN|payoff in progress|awaiting/i.test(body) ||
-          /payoff/i.test(head);
-        if (!open) continue;
-        const due = body.match(/payoff due\**\s*\$?([\d,]+)/i) ||
-          body.match(/\$([\d,]+)\b/);
-        ops.push({
-          source: "MASC", stage: "owed", urgent: true,
-          amount: due ? num(due[1].replace(/,/g, "")) : null,
-          title: `MASC payoff: ${head}`,
-          who: head,
-          action: "Confirm ledger + refresh good-through; collect on clearance",
-          why: "Payoff in progress — money owed to MASC.",
-        });
-      }
-    }
-  } catch (e) { warn("masc-loans", e); }
-
-  // Wholesaler pipeline — Tier 1 PROVEN/WARM contacts worth re-engaging for deals.
   try {
     const f = join(TRACKERS, "wholesaler-pipeline.md");
     if (existsSync(f)) {
@@ -338,76 +256,86 @@ function fromTrackers() {
         const src = cells[0].replace(/\*\*/g, "");
         if (/^source$/i.test(src)) continue;
         ops.push({
-          source: "Wholesaler", stage: tier === "PROVEN" ? "closing" : "nurture",
+          source: "Wholesaler", stage: "source", kind: "property",
           amount: null, urgent: tier === "PROVEN",
-          title: `Re-engage wholesaler: ${src}`,
+          title: `${src}`,
           who: cells[1],
           action: tier === "PROVEN"
-            ? "Re-engage — already closed a deal together"
-            : "Nudge for current off-market inventory (Sue drafts, Collin approves)",
+            ? "Re-engage for current inventory — already closed a deal together"
+            : "Ask for current off-market deals (Sue drafts, Collin approves)",
           why: cells[cells.length - 1].slice(0, 140),
         });
       }
     }
   } catch (e) { warn("wholesaler-pipeline", e); }
+  ok("Source-channel opportunities", ops.length);
+  return ops;
+}
 
-  // Services pipeline — any live lead (not the empty placeholder row).
+// ================= SOURCE: LLS (OPT-IN ONLY) ================================
+async function lendr(path) {
+  if (!LENDR_BASE || !LENDR_KEY) return null;
+  const r = await fetch(`${LENDR_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${LENDR_KEY}`, Accept: "application/json" },
+  });
+  if (!r.ok) throw new Error(`lendr ${path} ${r.status}`);
+  return r.json();
+}
+async function fromLendr() {
+  // Only runs when OPP_INCLUDE_LLS=1. Surfaces pipeline loans needing capital
+  // (a deal to fund), not repayments. Kept minimal and opt-in.
+  const ops = [];
+  if (!INCLUDE_LLS || !LENDR_BASE || !LENDR_KEY) return ops;
   try {
-    const f = join(TRACKERS, "services-pipeline.md");
-    if (existsSync(f)) {
-      const t = readFileSync(f, "utf8");
-      for (const line of t.split("\n")) {
-        if (!/^\|/.test(line) || /none yet|^\|\s*#|^\|\s*-+/.test(line)) continue;
-        const cells = line.split("|").map((c) => c.trim());
-        if (cells.length < 7 || cells[2] === "—" || !cells[2]) continue;
-        ops.push({
-          source: "Services", stage: "lead", amount: null,
-          title: `Service lead: ${cells[2]}`,
-          who: cells[2], action: `Advance stage (${cells[3]})`,
-          why: cells[7] || "AI services pipeline lead.",
-        });
-      }
+    const loansR = await lendr("/loans");
+    const pipeline = (loansR?.data || []).filter((l) =>
+      ["new", "underwriting", "preclosing", "clear"].includes(l.status));
+    for (const l of pipeline) {
+      const who = l.borrower?.name?.full || l.borrower?.name || "borrower";
+      ops.push({
+        source: "LLS", stage: "qualified", kind: "property", amount: num(l.amount),
+        title: `Loan to fund — ${who}`,
+        who, action: `Advance underwriting (${l.stage || l.status})`,
+        why: `${money(num(l.amount))} loan in ${l.status}${l.address ? ` · ${l.address}` : ""}.`,
+      });
     }
-  } catch (e) { warn("services-pipeline", e); }
-
-  ok("Tracker opportunities", ops.length);
+  } catch (e) { warn("lendr pipeline", e); }
+  ok("LLS pipeline opportunities", ops.length);
   return ops;
 }
 
 // ================= render =================
+const HEAD = {
+  ready: "🔥 Ready to underwrite / offer (docs in hand)",
+  qualified: "🎯 Identified deals (qualify & advance)",
+  new: "📥 New leads (sellers / refi inquiries)",
+  source: "🌱 Inventory channels (work for deals)",
+};
 function render(ops) {
-  const byStage = { owed: [], closing: [], lead: [], nurture: [] };
-  for (const o of ops) (byStage[o.stage] ?? byStage.lead).push(o);
+  const byStage = { ready: [], qualified: [], new: [], source: [] };
+  for (const o of ops) (byStage[o.stage] ?? byStage.new).push(o);
+  const known = ops.filter((o) => o.amount).reduce((s, o) => s + o.amount, 0);
+  const live = ops.filter((o) => o.stage !== "source").length;
 
-  const totalOwed = ops
-    .filter((o) => o.stage === "owed" && o.amount && !o.rollup)
-    .reduce((s, o) => s + o.amount, 0);
-
-  const head = {
-    owed: "💰 Money owed / cash in motion (collect)",
-    closing: "🔥 Ready to close (push)",
-    lead: "📥 New leads (qualify)",
-    nurture: "🌱 Nurture / re-engage",
-  };
-  let md = `# Daily Opportunity Report — ${todayISO}\n\n`;
-  md += `> Source-to-cash digest · ranked closest-to-cash first · ${ops.length} opportunities`;
-  if (totalOwed) md += ` · **${money(totalOwed)} owed/in-motion**`;
+  let md = `# Daily Acquisition Opportunities — ${todayISO}\n\n`;
+  md += `> Properties & businesses to buy or refinance · ranked closest-to-cash first · ${live} live deal${live === 1 ? "" : "s"}`;
+  if (known) md += ` · **${money(known)} in identified deal value**`;
   md += `\n\n`;
 
-  for (const stage of ["owed", "closing", "lead", "nurture"]) {
+  for (const stage of ["ready", "qualified", "new", "source"]) {
     const list = byStage[stage].sort((a, b) => score(b) - score(a));
     if (!list.length) continue;
-    md += `## ${head[stage]}\n\n`;
+    md += `## ${HEAD[stage]}\n\n`;
     for (const o of list) {
       const amt = o.amount ? ` — **${money(o.amount)}**` : "";
-      md += `- **[${o.source}] ${o.title}**${amt}\n`;
+      md += `- ${ICON[o.kind] || "•"} **[${o.source}] ${o.title}**${amt}\n`;
       md += `  - ▸ ${o.action}\n`;
       if (o.who) md += `  - 👤 ${o.who}\n`;
       if (o.why) md += `  - _${o.why}_\n`;
     }
     md += `\n`;
   }
-  md += `---\n_Generated ${now.toISOString()} · read-only · nothing sent or moved._\n`;
+  md += `---\n_Generated ${now.toISOString()} · acquisition/refi only · read-only._\n`;
   return md;
 }
 
@@ -415,14 +343,15 @@ function emailHTML(ops) {
   const top = ops.slice(0, TOP_N).filter((o) => EMAIL_TEXTS || o.source !== "Text");
   const rows = top.map((o) => {
     const amt = o.amount ? ` — ${money(o.amount)}` : "";
-    return `<li style="margin:0 0 10px"><b>[${o.source}] ${o.title}</b>${amt}<br>
+    return `<li style="margin:0 0 10px">${ICON[o.kind] || "•"} <b>[${o.source}] ${o.title}</b>${amt}<br>
       <span style="color:#444">▸ ${o.action}</span>
       ${o.who ? `<br><span style="color:#888;font-size:12px">${o.who}</span>` : ""}</li>`;
   }).join("");
-  const totalOwed = ops.filter((o) => o.stage === "owed" && o.amount && !o.rollup).reduce((s, o) => s + o.amount, 0);
+  const known = ops.filter((o) => o.amount).reduce((s, o) => s + o.amount, 0);
+  const live = ops.filter((o) => o.stage !== "source").length;
   return `<div style="font-family:-apple-system,Segoe UI,sans-serif;max-width:640px">
-    <h2 style="margin:0 0 4px">💵 Daily Opportunity Report — ${todayISO}</h2>
-    <p style="color:#666;margin:0 0 14px">${ops.length} opportunities, closest-to-cash first${totalOwed ? ` · <b>${money(totalOwed)} owed/in-motion</b>` : ""}.</p>
+    <h2 style="margin:0 0 4px">🏢 Daily Acquisition Opportunities — ${todayISO}</h2>
+    <p style="color:#666;margin:0 0 14px">${live} live deal${live === 1 ? "" : "s"} to buy or refinance, closest-to-cash first${known ? ` · <b>${money(known)} identified deal value</b>` : ""}.</p>
     <ol style="padding-left:18px">${rows}</ol>
     <p style="color:#999;font-size:12px">Full report in sue/trackers/opportunities/${todayISO}.md · read-only.</p>
   </div>`;
@@ -440,12 +369,12 @@ async function gmailToken() {
   if (!r.ok) throw new Error(`gmail token ${r.status}`);
   return (await r.json()).access_token;
 }
-
 async function sendDigest(ops) {
   if (!SEND_EMAIL) { console.log("opp: email send disabled."); return; }
   const token = await gmailToken();
   if (!token) { console.log("opp: Gmail creds absent — skipping email."); return; }
-  const subject = `💵 Daily Opportunities — ${todayISO} (${ops.length})`;
+  const live = ops.filter((o) => o.stage !== "source").length;
+  const subject = `🏢 Daily Acquisitions — ${todayISO} (${live} deals)`;
   const raw = [
     `To: ${REPORT_TO}`, `From: ${REPORT_TO}`, `Subject: ${subject}`,
     "MIME-Version: 1.0", 'Content-Type: text/html; charset="UTF-8"', "",
@@ -464,15 +393,24 @@ async function sendDigest(ops) {
 // ================= main =================
 async function main() {
   const results = await Promise.allSettled([
-    fromLendr(), fromEmail(), fromTexts(),
+    fromEmail(), fromTexts(),
     Promise.resolve(fromTrackers()),
+    fromLendr(),
   ]);
   const ops = [];
   for (const r of results) {
     if (r.status === "fulfilled") ops.push(...r.value);
     else warn("source", r.reason);
   }
-  ops.sort((a, b) => score(b) - score(a));
+
+  // Dedupe by kind + normalized title; keep the nearest-to-cash instance.
+  const seen = new Map();
+  for (const o of ops.sort((a, b) => score(b) - score(a))) {
+    const key = (o.kind || "") + "|" + (o.title || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (!seen.has(key)) seen.set(key, o);
+  }
+  const deduped = [...seen.values()].sort((a, b) => score(b) - score(a));
+  ops.length = 0; ops.push(...deduped);
 
   const md = render(ops);
   const dir = join(TRACKERS, "opportunities");

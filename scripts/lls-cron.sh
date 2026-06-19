@@ -10,7 +10,7 @@ set -euo pipefail
 
 # cron runs with a bare PATH — add where node/npm actually live.
 export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-cd "$HOME/Desktop/jarvis-command-center"
+cd "$HOME/Developer/jarvis-command-center"
 
 case "${1:-sync}" in
   sync)   node scripts/lls-sync.mjs ;;
