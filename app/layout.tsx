@@ -4,6 +4,7 @@ import "./globals.css";
 import { Nav } from "@/components/nav";
 import { StatusRibbon } from "@/components/status-ribbon";
 import { RoleProvider } from "@/components/role-context";
+import { ServiceWorkerRegister } from "@/components/sw-register";
 import { currentRole } from "@/lib/auth";
 
 const display = Space_Grotesk({
@@ -45,6 +46,7 @@ export default async function RootLayout({
     <html lang="en" className={`${display.variable} ${mono.variable}`}>
       <body>
         <RoleProvider canWrite={canWrite}>
+          <ServiceWorkerRegister />
           <StatusRibbon />
           <Nav />
           <main className="mx-auto max-w-6xl px-6 py-10">{children}</main>

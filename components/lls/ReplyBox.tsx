@@ -9,9 +9,11 @@ import { replyToLlsEmail } from "@/app/lending/actions";
 export function ReplyBox({
   messageId,
   hasLoan,
+  gmailReady = true,
 }: {
   messageId: string;
   hasLoan: boolean;
+  gmailReady?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [body, setBody] = useState("");
@@ -20,6 +22,19 @@ export function ReplyBox({
   const [result, setResult] = useState<
     null | { ok: boolean; comment: boolean; error?: string }
   >(null);
+
+  // Pre-flight: replying drafts via Gmail (compose scope). If the Gmail creds
+  // aren't set, say so up front instead of failing after the user composes.
+  if (!gmailReady) {
+    return (
+      <div
+        className="mt-3 inline-flex items-center gap-1.5 rounded border border-border bg-panel-2 px-2.5 py-1 font-mono text-[11px] text-muted"
+        title="Set GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN to enable reply drafting"
+      >
+        <AlertCircle size={11} /> Reply needs Gmail — not configured
+      </div>
+    );
+  }
 
   if (!open) {
     return (

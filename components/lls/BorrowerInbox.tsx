@@ -18,10 +18,12 @@ function InboxItem({
   item,
   loan,
   comments,
+  gmailReady,
 }: {
   item: LlsInboxItem;
   loan: LlsLoan | undefined;
   comments: LlsLoanComment[];
+  gmailReady: boolean;
 }) {
   const isTeam = (item.from_email || "").endsWith("@liquidlendingsolutions.com");
   return (
@@ -93,7 +95,11 @@ function InboxItem({
         </div>
       )}
 
-      <ReplyBox messageId={item.gmail_message_id} hasLoan={!!item.matched_loan_id} />
+      <ReplyBox
+        messageId={item.gmail_message_id}
+        hasLoan={!!item.matched_loan_id}
+        gmailReady={gmailReady}
+      />
     </div>
   );
 }
@@ -102,10 +108,12 @@ export function BorrowerInbox({
   items,
   loansById,
   commentsByLoan,
+  gmailReady = true,
 }: {
   items: LlsInboxItem[];
   loansById: Record<string, LlsLoan>;
   commentsByLoan: Record<string, LlsLoanComment[]>;
+  gmailReady?: boolean;
 }) {
   const [cat, setCat] = useState<string>("all");
   const [openOnly, setOpenOnly] = useState(false);
@@ -166,6 +174,7 @@ export function BorrowerInbox({
               comments={
                 item.matched_loan_id ? commentsByLoan[item.matched_loan_id] ?? [] : []
               }
+              gmailReady={gmailReady}
             />
           ))}
         </div>

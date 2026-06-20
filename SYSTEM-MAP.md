@@ -2,7 +2,7 @@
 
 _Last updated: 2026-06-19. How everything connects: data flows, tools, redundancies, and the security model. This is the canonical reference before scaling the system._
 
-> **Live code lives at `~/Developer/jarvis-command-center`.** (`~/Desktop/jarvis-command-center` was a symlink that is now a gutted stub — ignore it. `~/Desktop/jarvis/jarvis/` is the separate file-based "brain" data: cards, briefings, state — NOT the web app.)
+> **Live code lives at `~/Developer/jarvis-command-center`.** (`~/Desktop/jarvis-command-center` was a symlink that is now a gutted stub — ignore it.) **The file-based "brain" data (cards, briefings, state — NOT the web app) lives at `~/Developer/jarvis-brain/jarvis/`** — relocated from `~/Desktop/jarvis` on 2026-06-20 because macOS TCC blocked cron/launchd from running anything under Desktop (`EPERM uv_cwd`, which silently broke the morning pass).
 
 ---
 
@@ -22,11 +22,12 @@ A Next.js 15 + Supabase dashboard that pulls Collin's operations into one cockpi
 
 ```
 6:30am  launchd com.collin.text-intel.daily   → iMessage → Ollama → ~/text-intel-vault/intel/cards.json
-7:00am  morning-board.sh (cron/launchd)
-          1. /board pass (Claude CLI in ~/Desktop/jarvis)   → writes card/briefing .md files
+7:00am  morning-board.sh (crontab — SINGLE runner; the launchd jarvis-board job was retired 2026-06-20)
+          1. intake-cards.mjs  Gmail → reads Cowork "CEO Daily Briefing TITAN" → stages pending card .md
+                               (replaced the `claude -p /board` pass — agent MCP can't auth under cron)
           2. intel.mjs        Gmail/M365 → email_briefs + deal_analyses (deal flags)
           3. draft-replies.mjs Gmail → email_drafts (Sue-reviewed reply drafts)
-          4. sync.mjs         ~/Desktop/jarvis .md files → cards, briefings, handoffs, metrics
+          4. sync.mjs         ~/Developer/jarvis-brain .md files → cards, briefings, handoffs, metrics
           5. opportunity-report.mjs → "source-to-cash" digest (markdown + email to Collin)
 hourly  lls-cron.sh sync → lls-sync.mjs   Lendr API + Gmail → lls_snapshot, lls_loans, lls_inbox, lls_loan_comments
 1st/mo  lls-cron.sh report → lls-monthly-report.mjs → PDF to Drive + lls_reports row
@@ -91,7 +92,7 @@ Everything the dashboard shows is read from Supabase (except Texts, which reads 
 | **Ollama (local)** | text-intel pipeline, opportunity-report | on-device classification; raw text never leaves Mac | R | `OLLAMA_URL` (optional) |
 | **M365 / Outlook** | intel.mjs | optional second mailbox | R | `MS_*` (optional, half-built) |
 
-**Automation:** launchd — `com.collinschwartz.jarvis-server` (always-on dev), `com.collinschwartz.jarvis-board` (7:15am), `com.collin.text-intel.daily` (6:30am). Cron — `lls-cron.sh` hourly sync + monthly report. Logs in `/tmp/*.log` and `jarvis-dev.log`.
+**Automation:** launchd — `com.collinschwartz.jarvis-server` (always-on dev), `com.collin.text-intel.daily` (6:30am). Cron — `morning-board.sh` (7:00am, the single board runner), `lls-cron.sh` hourly sync + monthly report. Logs in `/tmp/*.log` and `jarvis-dev.log`. _(The `com.collinschwartz.jarvis-board` launchd job — old `run-board.sh` intake — was retired 2026-06-20; its plist is renamed `.disabled`. Principle: automate via credential-based `.mjs`, not `claude -p` agent runs that can't auth MCP headlessly.)_
 
 ---
 
@@ -140,6 +141,6 @@ Everything the dashboard shows is read from Supabase (except Texts, which reads 
 
 **Key paths:**
 - App: `~/Developer/jarvis-command-center` (`app/`, `lib/`, `components/`, `scripts/`, `supabase/migrations/`)
-- Brain data: `~/Desktop/jarvis/jarvis/` (`cards/`, `state/`)
+- Brain data: `~/Developer/jarvis-brain/jarvis/` (`cards/`, `briefings/`, `state/`) — `JARVIS_DIR` in `.env.local`
 - Text intel: `~/Documents/my-ai-team/text-intel/` (pipeline) + `~/text-intel-vault/` (output, chmod 700)
 - Opportunity digests: `~/Documents/my-ai-team/sue/trackers/opportunities/`

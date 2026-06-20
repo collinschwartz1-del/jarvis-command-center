@@ -24,6 +24,8 @@ export default async function DealDetailPage({
   const isFlip = a.asset_type === "flip" || a.routed_to === "flip-tracker";
   // A flagged-but-not-yet-underwritten multifamily stub: no score yet, not a flip.
   const isStub = !isFlip && a.fit_score == null;
+  // An already-screened multifamily deal — offer a re-run (docs arrived / assumptions changed).
+  const isScoredMf = !isFlip && a.fit_score != null;
   const flipTrackerUrl = process.env.NEXT_PUBLIC_FLIP_TRACKER_URL;
 
   return (
@@ -39,7 +41,7 @@ export default async function DealDetailPage({
       <AnalysisCard a={a} />
 
       {/* Actions / full-access */}
-      {(isStub || isFlip) && (
+      {(isStub || isScoredMf || isFlip) && (
         <div className="mt-6">
           <SectionLabel>Full access</SectionLabel>
           <div className="rounded-lg border border-border bg-panel p-5">
@@ -56,6 +58,23 @@ export default async function DealDetailPage({
                   dealName={a.deal_name}
                   address={a.address}
                   source={a.source}
+                />
+              </>
+            )}
+
+            {isScoredMf && (
+              <>
+                <p className="mb-3 text-sm text-muted">
+                  Already screened. Re-run if docs arrived or assumptions changed
+                  — paste a T-12 / rent roll / OM under <span className="text-zinc-300">Add docs</span> to
+                  screen on real numbers. The result overwrites this analysis.
+                </p>
+                <RunUnderwritingButton
+                  id={a.id}
+                  dealName={a.deal_name}
+                  address={a.address}
+                  source={a.source}
+                  rerun
                 />
               </>
             )}

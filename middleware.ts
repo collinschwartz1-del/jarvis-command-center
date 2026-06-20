@@ -55,6 +55,6 @@ export const config = {
   // Skip auth on Next internals + the public PWA assets (icon/manifest are
   // fetched by the OS without a session cookie and carry nothing sensitive).
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest|sw.js).*)",
   ],
 };

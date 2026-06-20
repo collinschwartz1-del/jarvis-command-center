@@ -121,9 +121,26 @@ ${input.docText?.slice(0, 120000) ?? "(none — screen on the header data above 
     convo.push({ role: "assistant", content: msg.content });
   }
 
+  // Guard the empty-result path: if the model ended without a text block (e.g.
+  // interrupted mid web-search / hit the pause-loop bound), DON'T parse "{}" and
+  // write an all-null analysis — throw so the caller surfaces a retryable error.
   const textBlocks = (msg?.content ?? []).filter((b) => b.type === "text");
   const last = textBlocks[textBlocks.length - 1];
-  const parsed = JSON.parse(last && "text" in last ? last.text : "{}");
+  const text = last && "text" in last ? last.text.trim() : "";
+  if (!text) {
+    throw new Error(
+      "The underwriting model returned no analysis (likely interrupted mid web-search). Nothing was saved — try again."
+    );
+  }
+  let parsed: LwResult;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("The underwriting result wasn't valid JSON. Nothing was saved — try again.");
+  }
+  if (typeof parsed.fit_score !== "number") {
+    throw new Error("The underwriting result was incomplete (no fit score). Nothing was saved — try again.");
+  }
   const ppu =
     parsed.price && parsed.units ? Math.round(parsed.price / parsed.units) : null;
 

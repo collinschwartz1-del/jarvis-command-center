@@ -41,6 +41,14 @@ export default async function LendingPage() {
   const handled = inbox.filter((i) => i.handled);
   const orderedInbox = [...open, ...handled];
 
+  // Reply drafting needs Gmail compose creds — pre-flight so the Reply control
+  // tells the user up front when it's unconfigured instead of failing on click.
+  const gmailReady = !!(
+    process.env.GMAIL_CLIENT_ID &&
+    process.env.GMAIL_CLIENT_SECRET &&
+    process.env.GMAIL_REFRESH_TOKEN
+  );
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -72,6 +80,7 @@ export default async function LendingPage() {
                 items={orderedInbox}
                 loansById={loansById}
                 commentsByLoan={commentsByLoan}
+                gmailReady={gmailReady}
               />
             ) : (
               <Empty>
