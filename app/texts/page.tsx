@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default function TextsPage() {
   const { cards, generatedAt, available } = getTextIntel();
+  const isCloud = !!(process.env.VERCEL || process.env.VERCEL_ENV);
 
   if (!available) {
     return (
@@ -16,15 +17,29 @@ export default function TextsPage() {
           title="TEXTS · INTEL"
           subtitle="Business intelligence mined locally from your iMessage history. Raw texts never leave your Mac."
         />
-        <ClassifyButton />
-        <Empty>
-          No intel yet. Run the local pipeline in{" "}
-          <span className="font-mono text-accent">~/Documents/my-ai-team/text-intel</span>:{" "}
-          <span className="font-mono text-accent">
-            npm run extract &amp;&amp; npm run filter &amp;&amp; npm run classify &amp;&amp; npm run digest
-          </span>
-          . This tab reads the local vault, so it only shows when run on your Mac.
-        </Empty>
+        {isCloud ? (
+          // On the cloud deploy this tab CAN'T work — the vault is on the Mac and
+          // raw texts deliberately never leave it. Say so plainly; no dead button.
+          <Empty>
+            Texts is a <span className="text-zinc-300">local-only</span> tab. It reads
+            the iMessage intel vault on your Mac, which this hosted version can&apos;t
+            reach — and shouldn&apos;t, since raw texts never leave your machine. Open
+            Jarvis on your Mac (<span className="font-mono text-accent">localhost:3000/texts</span>)
+            to see it.
+          </Empty>
+        ) : (
+          <>
+            <ClassifyButton />
+            <Empty>
+              No intel yet. Run the local pipeline in{" "}
+              <span className="font-mono text-accent">~/Documents/my-ai-team/text-intel</span>:{" "}
+              <span className="font-mono text-accent">
+                npm run extract &amp;&amp; npm run filter &amp;&amp; npm run classify &amp;&amp; npm run digest
+              </span>
+              . This tab reads the local vault, so it only shows when run on your Mac.
+            </Empty>
+          </>
+        )}
       </div>
     );
   }
