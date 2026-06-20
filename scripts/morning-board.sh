@@ -13,12 +13,13 @@ export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PA
 JARVIS_DIR="$HOME/Developer/jarvis-brain"   # moved off Desktop (macOS TCC blocked cron from Desktop). sync.mjs reads this via .env.local.
 CC_DIR="$HOME/Developer/jarvis-command-center"
 
-# 1. (RETIRED 2026-06-20) The `claude -p /board` brief-generation pass was removed.
-#    Cowork's "CEO Daily Briefing TITAN" now owns the morning brief, and the
-#    interactive `claude -p` agent could not auth its MCP connectors under cron
-#    (the reason intel/draft-replies below were rebuilt as credential-based
-#    .mjs scripts). Card INTAKE (brief -> cards) is being ported to a .mjs step
-#    on the same pattern; until then, sync (step 4) mirrors existing brain cards.
+# 1. INTAKE: read Cowork's "CEO Daily Briefing TITAN" and stage approvable cards.
+#    Credential-based (Gmail OAuth + Anthropic key) so it runs unattended — it
+#    replaces the old `claude -p /board` pass, which couldn't auth its MCP
+#    connectors under cron. Writes pending card .md into the brain; step 4 (sync)
+#    mirrors them to the dashboard. Nothing executes until Collin approves a card.
+cd "$CC_DIR"
+node scripts/intake-cards.mjs || echo "card intake skipped (see log)"
 
 # 2. Refresh command-center intel: inbox summaries + deal flags.
 #    Headless + credential-based (no MCP) — see scripts/intel.mjs. The old

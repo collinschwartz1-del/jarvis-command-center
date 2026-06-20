@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "sync": "node scripts/sync.mjs",
+    "intake": "node scripts/intake-cards.mjs",
     "intel": "node scripts/intel.mjs",
     "draft-replies": "node scripts/draft-replies.mjs",
     "lls-sync": "node scripts/lls-sync.mjs",
