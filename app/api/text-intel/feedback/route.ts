@@ -8,6 +8,14 @@ import { requireOwner } from "@/lib/auth";
 // Local-only: writes to ~/text-intel-vault/feedback.jsonl, never to cloud.
 export async function POST(req: NextRequest) {
   try {
+    // The vault lives only on this Mac — refuse on any cloud deploy (consistent
+    // with the classify/reconcile routes) so we never attempt a missing-path write.
+    if (process.env.VERCEL || process.env.VERCEL_ENV) {
+      return NextResponse.json(
+        { ok: false, error: "Disabled in cloud — run Jarvis locally." },
+        { status: 403 }
+      );
+    }
     await requireOwner();
     const body = await req.json();
     const entry = {

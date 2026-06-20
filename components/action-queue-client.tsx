@@ -11,6 +11,7 @@ import {
 import { approveCard, dismissCard, dismissReply } from "@/app/actions";
 import { markHandled } from "@/app/lending/actions";
 import { DelegateButton } from "./delegate-button";
+import { useCanWrite } from "./role-context";
 
 const DELEGATABLE = new Set(["card", "reply", "borrower"]);
 
@@ -36,6 +37,7 @@ export function ActionQueueBoard({
   const [filter, setFilter] = useState<Filter>("all");
   const [resolved, setResolved] = useState<Set<string>>(new Set());
   const [pending, start] = useTransition();
+  const canWrite = useCanWrite();
 
   const counts = useMemo(() => queueCounts(items), [items]);
   const live = items.filter((i) => !resolved.has(i.key));
@@ -88,7 +90,13 @@ export function ActionQueueBoard({
       {/* the queue */}
       <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
         {visible.map((it) => (
-          <Row key={it.key} item={it} onResolve={resolve} />
+          <Row
+            key={it.key}
+            item={it}
+            onResolve={resolve}
+            canWrite={canWrite}
+            pending={pending}
+          />
         ))}
         {!visible.length && (
           <p className="col-span-full rounded-lg border border-border bg-panel px-4 py-5 text-sm text-muted">
@@ -103,9 +111,13 @@ export function ActionQueueBoard({
 function Row({
   item,
   onResolve,
+  canWrite,
+  pending,
 }: {
   item: ActionQueueItem;
   onResolve: (key: string, fn: () => Promise<unknown>) => void;
+  canWrite: boolean;
+  pending: boolean;
 }) {
   const m = domainMeta(item.domain);
   return (
@@ -137,41 +149,46 @@ function Row({
         <p className="mt-1 line-clamp-1 text-xs text-muted">{item.why}</p>
       </Link>
 
-      {/* inline actions */}
+      {/* inline actions — owners only; viewers get the deep-link */}
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
-        {item.domain === "card" && (
+        {canWrite && item.domain === "card" && (
           <>
             <ActBtn
               tone="go"
               label="✓ Approve"
+              disabled={pending}
               onClick={() => onResolve(item.key, () => approveCard(item.refId))}
             />
             <ActBtn
               tone="kill"
               label="Dismiss"
+              disabled={pending}
               onClick={() => onResolve(item.key, () => dismissCard(item.refId))}
             />
           </>
         )}
-        {item.domain === "reply" && (
+        {canWrite && item.domain === "reply" && (
           <ActBtn
             tone="kill"
             label="Dismiss"
+            disabled={pending}
             onClick={() => onResolve(item.key, () => dismissReply(item.refId))}
           />
         )}
-        {item.domain === "borrower" && (
+        {canWrite && item.domain === "borrower" && (
           <ActBtn
             tone="go"
             label="✓ Mark handled"
+            disabled={pending}
             onClick={() => onResolve(item.key, () => markHandled(item.refId))}
           />
         )}
-        {DELEGATABLE.has(item.domain) && (
+        {canWrite && DELEGATABLE.has(item.domain) && (
           <DelegateButton
             domain={item.domain as "card" | "reply" | "borrower"}
             refId={item.refId}
             title={item.title}
+            disabled={pending}
             onHandOff={(fn) => onResolve(item.key, fn)}
           />
         )}
@@ -190,15 +207,18 @@ function ActBtn({
   label,
   tone,
   onClick,
+  disabled,
 }: {
   label: string;
   tone: "go" | "kill";
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`rounded px-2 py-1 font-mono text-[11px] transition-colors ${
+      disabled={disabled}
+      className={`rounded px-2 py-1 font-mono text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
         tone === "go"
           ? "border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
           : "border border-border text-muted hover:bg-panel-2 hover:text-text"

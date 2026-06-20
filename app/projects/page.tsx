@@ -15,9 +15,11 @@ export default async function ProjectsPage() {
       />
 
       <p className="mb-6 rounded-lg border border-border bg-panel-2 px-4 py-2.5 text-xs text-muted">
-        Approving here updates the command center. Syncing decisions back to the
-        Jarvis files (so <span className="font-mono text-zinc-300">/pickup</span>{" "}
-        executes them) is the Phase 4 runner.
+        Approving (or dismissing) here updates the command center{" "}
+        <span className="text-zinc-300">and writes the decision back to the
+        source Jarvis card file</span>, so{" "}
+        <span className="font-mono text-zinc-300">/pickup</span> sees it on the
+        next pass.
       </p>
 
       {cards.length ? (

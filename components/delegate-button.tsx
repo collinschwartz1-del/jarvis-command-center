@@ -14,11 +14,13 @@ export function DelegateButton({
   refId,
   title,
   onHandOff,
+  disabled,
 }: {
   domain: DelegateDomain;
   refId: string;
   title: string;
   onHandOff: (fn: () => Promise<unknown>) => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [assignee, setAssignee] = useState(ASSIGNEES[0]);
@@ -28,7 +30,8 @@ export function DelegateButton({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="rounded px-2 py-1 font-mono text-[11px] text-muted transition-colors hover:bg-panel-2 hover:text-text"
+        disabled={disabled}
+        className="rounded px-2 py-1 font-mono text-[11px] text-muted transition-colors hover:bg-panel-2 hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
       >
         ⤳ Delegate
       </button>
@@ -68,11 +71,12 @@ export function DelegateButton({
         className="mt-2 w-full rounded border border-border bg-panel-2 px-2 py-1 text-xs text-text outline-none placeholder:text-muted focus:border-accent/50"
       />
       <button
+        disabled={disabled}
         onClick={() => {
           onHandOff(() => delegate({ domain, refId, title, assignee, note }));
           setOpen(false);
         }}
-        className="mt-2 w-full rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 font-mono text-[11px] text-emerald-300 transition-colors hover:bg-emerald-500/20"
+        className="mt-2 w-full rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 font-mono text-[11px] text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
       >
         Hand off to {assignee} →
       </button>
