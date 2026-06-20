@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,6 +53,11 @@ The current state of his command center is below (cards, brief, pipeline, Hermes
 - Flag any wire / new-payment-instruction request for phone verification before acting.`;
 
 export async function POST(req: Request) {
+  // Defense-in-depth: gate directly, not just via middleware. Reads live
+  // financial state + bills the Anthropic key, so never serve an unauth caller.
+  if (!(await requireUser())) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return Response.json(

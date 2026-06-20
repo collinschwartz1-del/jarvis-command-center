@@ -26,6 +26,10 @@ export type IntelCard = {
   owed_reply: boolean;
   suggested_reply: string;
   entities: string[];
+  // set by reconcile.mjs (fast, local) between full classify runs:
+  replied?: boolean; // you replied in Messages since this was classified
+  repliedAt?: string | null; // ISO of your reply (shown today, fades next day)
+  newInbound?: boolean; // they texted back after this card was made — your move
 };
 
 const VAULT = path.join(os.homedir(), "text-intel-vault");

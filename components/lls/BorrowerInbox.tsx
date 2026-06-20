@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import { Mail, MessageSquare, Link2 } from "lucide-react";
 import { timeAgo } from "@/lib/format";
 import { ReplyBox } from "@/components/lls/ReplyBox";
@@ -104,16 +107,73 @@ export function BorrowerInbox({
   loansById: Record<string, LlsLoan>;
   commentsByLoan: Record<string, LlsLoanComment[]>;
 }) {
+  const [cat, setCat] = useState<string>("all");
+  const [openOnly, setOpenOnly] = useState(false);
+
+  // Categories actually present, in a stable order.
+  const cats = useMemo(() => {
+    const order = ["borrower-request", "draw", "payoff", "notification", "other"];
+    const present = new Set(items.map((i) => i.category || "other"));
+    return order.filter((c) => present.has(c));
+  }, [items]);
+
+  const visible = items.filter(
+    (i) =>
+      (cat === "all" || (i.category || "other") === cat) &&
+      (!openOnly || !i.handled)
+  );
+
+  const chip = (key: string, label: string, n: number) => (
+    <button
+      key={key}
+      onClick={() => setCat(key)}
+      className={`rounded-full border px-2.5 py-1 font-mono text-[11px] transition-colors ${
+        cat === key
+          ? "border-accent/60 bg-accent/15 text-accent"
+          : "border-border bg-panel-2 text-muted hover:text-text"
+      }`}
+    >
+      {label} {n}
+    </button>
+  );
+
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {items.map((item) => (
-        <InboxItem
-          key={item.gmail_message_id}
-          item={item}
-          loan={item.matched_loan_id ? loansById[item.matched_loan_id] : undefined}
-          comments={item.matched_loan_id ? commentsByLoan[item.matched_loan_id] ?? [] : []}
-        />
-      ))}
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {chip("all", "All", items.length)}
+        {cats.map((c) =>
+          chip(c, c, items.filter((i) => (i.category || "other") === c).length)
+        )}
+        <button
+          onClick={() => setOpenOnly((v) => !v)}
+          className={`ml-auto rounded-full border px-2.5 py-1 font-mono text-[11px] transition-colors ${
+            openOnly
+              ? "border-accent/60 bg-accent/15 text-accent"
+              : "border-border bg-panel-2 text-muted hover:text-text"
+          }`}
+        >
+          {openOnly ? "✓ " : ""}Open only
+        </button>
+      </div>
+
+      {visible.length ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {visible.map((item) => (
+            <InboxItem
+              key={item.gmail_message_id}
+              item={item}
+              loan={item.matched_loan_id ? loansById[item.matched_loan_id] : undefined}
+              comments={
+                item.matched_loan_id ? commentsByLoan[item.matched_loan_id] ?? [] : []
+              }
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-lg border border-border bg-panel px-4 py-5 text-sm text-muted">
+          Nothing in this view.
+        </p>
+      )}
     </div>
   );
 }

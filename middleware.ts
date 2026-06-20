@@ -1,11 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { isAllowed } from "@/lib/roles";
+import { devOwnerEmail, isAllowed } from "@/lib/roles";
 
 // Gate every route (pages + API) behind an authed, allowlisted session.
 // Public: /login and /auth/*.
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next({ request: req });
+
+  // Local-dev bypass: on `npm run dev` (never on Vercel) skip the gate entirely.
+  if (devOwnerEmail()) return res;
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

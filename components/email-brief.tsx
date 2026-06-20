@@ -1,9 +1,14 @@
 "use client";
 
-import { useTransition } from "react";
-import { Check, Mail } from "lucide-react";
+import { useState, useTransition } from "react";
+import Link from "next/link";
+import { Mail, FilePlus2, X, Layers, MessageSquareReply } from "lucide-react";
 import type { EmailBrief } from "@/lib/types";
-import { toggleActionItem } from "@/app/actions";
+import {
+  captureActionItem,
+  dismissActionItem,
+  combineIntoProject,
+} from "@/app/actions";
 import { useCanWrite } from "./role-context";
 
 function timeAgo(iso: string | null): string {
@@ -22,13 +27,49 @@ const MAILBOX: Record<string, string> = {
 };
 
 export function EmailBriefCard({ brief }: { brief: EmailBrief }) {
-  const [pending, start] = useTransition();
   const canWrite = useCanWrite();
-  const actionItems = brief.action_items ?? [];
-  const openCount = actionItems.filter((a) => !a.done).length;
+  const [pending, start] = useTransition();
+  const items = brief.action_items ?? [];
+
+  // indexes handled this session (optimistic) + a multi-select set for bundling
+  const [resolved, setResolved] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [title, setTitle] = useState("");
+
+  const handled = (i: number) => items[i].done || resolved.has(i);
+  const openCount = items.filter((_, i) => !handled(i)).length;
+
+  function run(indexes: number[], fn: () => Promise<unknown>) {
+    setResolved((p) => {
+      const n = new Set(p);
+      indexes.forEach((i) => n.add(i));
+      return n;
+    });
+    setSelected(new Set());
+    start(async () => {
+      try {
+        await fn();
+      } catch {
+        setResolved((p) => {
+          const n = new Set(p);
+          indexes.forEach((i) => n.delete(i));
+          return n;
+        });
+      }
+    });
+  }
+
+  function toggleSel(i: number) {
+    setSelected((p) => {
+      const n = new Set(p);
+      n.has(i) ? n.delete(i) : n.add(i);
+      return n;
+    });
+  }
 
   return (
     <div className="ticked rounded-lg border border-border bg-panel p-5">
+      {/* header */}
       <div className="flex flex-wrap items-center gap-2">
         <Mail size={14} className="text-muted" />
         <span className="text-sm font-semibold text-text">{brief.person_name}</span>
@@ -55,9 +96,17 @@ export function EmailBriefCard({ brief }: { brief: EmailBrief }) {
         {openCount > 0 && (
           <>
             <span className="text-border-bright">/</span>
-            <span className="text-accent">{openCount} open action{openCount === 1 ? "" : "s"}</span>
+            <span className="text-accent">
+              {openCount} open action{openCount === 1 ? "" : "s"}
+            </span>
           </>
         )}
+        <Link
+          href="/replies"
+          className="ml-auto inline-flex items-center gap-1 text-muted transition-colors hover:text-accent"
+        >
+          <MessageSquareReply size={11} /> Reply
+        </Link>
       </div>
 
       <p className="mt-3 text-sm leading-relaxed text-zinc-300">{brief.summary}</p>
@@ -78,37 +127,89 @@ export function EmailBriefCard({ brief }: { brief: EmailBrief }) {
         </div>
       )}
 
-      {actionItems.length > 0 && (
+      {items.length > 0 && (
         <div className="mt-4 rounded border border-border bg-panel-2 p-3">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-accent/80">
-            Action Items
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-accent/80">
+              Action Items
+            </span>
+            {selected.size > 1 && (
+              <span className="font-mono text-[10px] text-muted">
+                {selected.size} selected
+              </span>
+            )}
           </div>
+
           <ul className="mt-2 space-y-1.5">
-            {actionItems.map((a, i) => (
-              <li key={i}>
-                <button
-                  disabled={pending || !canWrite}
-                  onClick={() =>
-                    canWrite && start(() => toggleActionItem(brief.id, i))
-                  }
-                  className="flex w-full items-start gap-2.5 text-left text-sm leading-snug disabled:cursor-default disabled:opacity-100"
+            {items.map((a, i) =>
+              handled(i) ? (
+                <li
+                  key={i}
+                  className="flex items-start gap-2.5 text-sm leading-snug text-muted line-through"
                 >
-                  <span
-                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                      a.done
-                        ? "border-accent bg-accent/20 text-accent"
-                        : "border-border-bright text-transparent hover:border-accent"
-                    }`}
-                  >
-                    <Check size={11} />
-                  </span>
-                  <span className={a.done ? "text-muted line-through" : "text-zinc-200"}>
+                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-border-bright" />
+                  {a.text}
+                </li>
+              ) : (
+                <li key={i} className="group flex items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(i)}
+                    disabled={!canWrite}
+                    onChange={() => toggleSel(i)}
+                    title="Select to combine into a project"
+                    className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--accent,#6ee7b7)] disabled:opacity-30"
+                  />
+                  <span className="flex-1 text-sm leading-snug text-zinc-200">
                     {a.text}
                   </span>
-                </button>
-              </li>
-            ))}
+                  {canWrite && (
+                    <span className="flex shrink-0 items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100">
+                      <button
+                        onClick={() => run([i], () => captureActionItem(brief.id, i))}
+                        disabled={pending}
+                        title="Capture as a tracked card"
+                        className="inline-flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300 transition-colors hover:bg-emerald-500/20"
+                      >
+                        <FilePlus2 size={11} /> Card
+                      </button>
+                      <button
+                        onClick={() => run([i], () => dismissActionItem(brief.id, i))}
+                        disabled={pending}
+                        title="Clear without a card"
+                        className="rounded border border-border px-1.5 py-0.5 text-muted transition-colors hover:bg-panel hover:text-text"
+                      >
+                        <X size={11} />
+                      </button>
+                    </span>
+                  )}
+                </li>
+              )
+            )}
           </ul>
+
+          {/* combine bar — appears when 2+ items selected */}
+          {selected.size > 1 && canWrite && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={`${brief.person_name} project name…`}
+                className="min-w-0 flex-1 rounded border border-border bg-panel px-2 py-1 text-xs text-text outline-none placeholder:text-muted focus:border-accent/50"
+              />
+              <button
+                disabled={pending}
+                onClick={() =>
+                  run([...selected], () =>
+                    combineIntoProject(brief.id, [...selected], title)
+                  )
+                }
+                className="inline-flex items-center gap-1.5 rounded border border-accent/40 bg-accent/15 px-2.5 py-1 font-mono text-[11px] text-accent transition-colors hover:bg-accent/25"
+              >
+                <Layers size={12} /> Combine {selected.size} → project
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

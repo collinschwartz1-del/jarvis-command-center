@@ -1,3 +1,5 @@
+import { requireUser } from "@/lib/auth";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -8,6 +10,9 @@ const VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "pNInz6obpgDQGcFmaJgB"; // A
 const MODEL_ID = process.env.ELEVENLABS_MODEL_ID ?? "eleven_turbo_v2_5";
 
 export async function POST(req: Request) {
+  if (!(await requireUser())) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
     return Response.json({ error: "tts_not_configured" }, { status: 503 });
@@ -36,10 +41,8 @@ export async function POST(req: Request) {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    return Response.json(
-      { error: "elevenlabs_failed", status: res.status, detail: detail.slice(0, 300) },
-      { status: 502 }
-    );
+    console.error("ElevenLabs TTS failed:", res.status, detail.slice(0, 300));
+    return Response.json({ error: "tts_unavailable" }, { status: 502 });
   }
 
   return new Response(res.body, {

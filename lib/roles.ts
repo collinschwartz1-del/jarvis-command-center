@@ -52,3 +52,25 @@ export function isAllowed(email?: string | null): boolean {
 export function isOwner(email?: string | null): boolean {
   return roleOf(email) === "owner";
 }
+
+// Local-dev bypass. When Jarvis runs via `npm run dev` on Collin's own Mac, skip
+// the Supabase magic-link dance and treat the session as the owner — the Texts
+// tab + local vault are single-user and never deployed.
+//
+// TRIPLE-GUARDED so it can NEVER activate on any deployed/production instance:
+//   1. NODE_ENV must be exactly "development"  (next dev only; next start = production)
+//   2. process.env.VERCEL must be unset        (any Vercel deploy sets this)
+//   3. JARVIS_LOCAL_BYPASS must equal "1"       (explicit opt-in; only in local .env.local,
+//                                                which is gitignored and never shipped)
+// All three must hold. A stray `next start`, preview deploy, or self-hosted replica
+// missing the flag falls straight through to real Supabase auth.
+export function devOwnerEmail(): string | null {
+  if (
+    process.env.NODE_ENV === "development" &&
+    !process.env.VERCEL &&
+    process.env.JARVIS_LOCAL_BYPASS === "1"
+  ) {
+    return ownerEmails()[0] ?? "collinschwartz1@gmail.com";
+  }
+  return null;
+}

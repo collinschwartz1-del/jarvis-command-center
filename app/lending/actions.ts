@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase";
 import { createLoanComment } from "@/lib/lendr";
+import { requireOwner } from "@/lib/auth";
 
 // Reply flow for the LLS Borrower Inbox. We DRAFT the email reply on its Gmail
 // thread (Collin reviews + sends from Gmail — honors the check-before-send rule)
@@ -91,6 +92,7 @@ export async function replyToLlsEmail(
   body: string,
   alsoComment: boolean
 ): Promise<ReplyResult> {
+  await requireOwner(); // owner-only: this drafts external email + writes Lendr comments
   const text = body.trim();
   if (!text) return { ok: false, draft: false, comment: false, error: "Empty reply." };
 
@@ -108,7 +110,8 @@ export async function replyToLlsEmail(
     await draftGmailReply(messageId, item.gmail_thread_id, text);
     draft = true;
   } catch (e: any) {
-    return { ok: false, draft: false, comment: false, error: e.message };
+    console.error("LLS reply draft failed:", e);
+    return { ok: false, draft: false, comment: false, error: "Couldn't draft the reply — check server logs." };
   }
 
   if (alsoComment && item.matched_loan_id) {
@@ -140,6 +143,7 @@ export async function replyToLlsEmail(
 }
 
 export async function markHandled(messageId: string): Promise<void> {
+  await requireOwner();
   const db = supabaseAdmin();
   await db.from("lls_inbox").update({ handled: true }).eq("gmail_message_id", messageId);
   revalidatePath("/lending");

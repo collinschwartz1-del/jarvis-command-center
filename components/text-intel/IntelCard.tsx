@@ -65,6 +65,11 @@ export function IntelCard({ card }: { card: Card }) {
               waiting on you
             </span>
           )}
+          {card.newInbound && (
+            <span className="rounded bg-sky-500/15 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-sky-300">
+              ↩ new message
+            </span>
+          )}
         </div>
         {canWrite && (
           <button

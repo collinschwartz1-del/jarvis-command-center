@@ -8,12 +8,20 @@ export const dynamic = "force-dynamic";
 export default async function InboxPage() {
   const briefs = await getEmailBriefs();
 
+  const openOf = (b: (typeof briefs)[number]) =>
+    (b.action_items ?? []).filter((a) => !a.done).length;
+
+  // Most-demanding relationships first: who has the most open actions on you,
+  // then most recent. Surfaces what needs a move instead of a flat list.
+  const sorted = [...briefs].sort(
+    (a, b) =>
+      openOf(b) - openOf(a) ||
+      new Date(b.latest_at ?? 0).getTime() - new Date(a.latest_at ?? 0).getTime()
+  );
+
   const people = briefs.length;
   const threads = briefs.reduce((n, b) => n + b.thread_count, 0);
-  const openActions = briefs.reduce(
-    (n, b) => n + (b.action_items ?? []).filter((a) => !a.done).length,
-    0
-  );
+  const openActions = briefs.reduce((n, b) => n + openOf(b), 0);
 
   return (
     <div>
@@ -28,9 +36,9 @@ export default async function InboxPage() {
         <MetricTile label="Actions" value={openActions} sub="open on you" />
       </div>
 
-      {briefs.length ? (
+      {sorted.length ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          {briefs.map((b) => (
+          {sorted.map((b) => (
             <EmailBriefCard key={b.id} brief={b} />
           ))}
         </div>

@@ -24,6 +24,47 @@ export async function gmailToken(): Promise<string | null> {
   return (await r.json()).access_token as string;
 }
 
+// Live state of a Gmail thread — used to reconcile dashboard state against what
+// actually happened in the mailbox (did Collin already reply? did they follow
+// up?). Outbound messages carry the "SENT" label.
+export interface ThreadState {
+  count: number;
+  lastAt: number; // ms of the most recent message
+  lastFromMe: boolean; // is the most recent message outbound?
+  lastSentAt: number | null; // ms of Collin's most recent outbound
+  lastInboundAt: number | null; // ms of the other side's most recent message
+}
+
+export async function getThreadState(
+  token: string,
+  threadId: string
+): Promise<ThreadState | null> {
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}?format=metadata&metadataHeaders=From&metadataHeaders=Date`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) return null;
+  const data = (await res.json()) as {
+    messages?: { internalDate?: string; labelIds?: string[] }[];
+  };
+  const msgs = data.messages ?? [];
+  let lastAt = 0,
+    lastFromMe = false,
+    lastSentAt: number | null = null,
+    lastInboundAt: number | null = null;
+  for (const m of msgs) {
+    const at = Number(m.internalDate || 0);
+    const sent = (m.labelIds ?? []).includes("SENT");
+    if (sent) lastSentAt = Math.max(lastSentAt ?? 0, at);
+    else lastInboundAt = Math.max(lastInboundAt ?? 0, at);
+    if (at >= lastAt) {
+      lastAt = at;
+      lastFromMe = sent;
+    }
+  }
+  return { count: msgs.length, lastAt, lastFromMe, lastSentAt, lastInboundAt };
+}
+
 export interface DraftTarget {
   thread_id: string;
   to_email: string;

@@ -23,10 +23,17 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export function ReplyCard({ draft }: { draft: EmailDraft }) {
+export function ReplyCard({
+  draft,
+  onResolved,
+}: {
+  draft: EmailDraft;
+  onResolved?: (id: string) => void;
+}) {
   const canWrite = useCanWrite();
   const [pending, start] = useTransition();
   const [showOriginal, setShowOriginal] = useState(false);
+  const [compare, setCompare] = useState(false);
   const [done, setDone] = useState<null | "approved" | "dismissed">(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +63,7 @@ export function ReplyCard({ draft }: { draft: EmailDraft }) {
       try {
         await approveReply(draft.id, selected, bodies[selected]);
         setDone("approved");
+        onResolved?.(draft.id);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to stage Gmail draft.");
       }
@@ -68,6 +76,7 @@ export function ReplyCard({ draft }: { draft: EmailDraft }) {
       try {
         await dismissReply(draft.id);
         setDone("dismissed");
+        onResolved?.(draft.id);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to dismiss.");
       }
@@ -152,28 +161,83 @@ export function ReplyCard({ draft }: { draft: EmailDraft }) {
 
       {/* option selector (decision threads) */}
       {isDecision && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {variants.map((v, i) => {
-            const held = v.verdict === "hold";
-            const active = i === selected;
-            return (
-              <button
-                key={i}
-                onClick={() => setSelected(i)}
-                title={held ? v.note ?? "Sue flagged this option" : undefined}
-                className={`rounded border px-3 py-1 text-xs transition-colors ${
-                  active
-                    ? "border-accent bg-accent/10 text-accent"
-                    : held
-                      ? "border-amber-500/40 bg-amber-500/5 text-amber-300/80 hover:border-amber-400"
-                      : "border-border-bright text-zinc-300 hover:border-accent hover:text-text"
-                }`}
-              >
-                {v.label}
-                {held && <span className="ml-1 normal-case opacity-70">⚠</span>}
-              </button>
-            );
-          })}
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {variants.map((v, i) => {
+              const held = v.verdict === "hold";
+              const active = i === selected;
+              return (
+                <button
+                  key={i}
+                  onClick={() => setSelected(i)}
+                  title={held ? v.note ?? "Sue flagged this option" : undefined}
+                  className={`rounded border px-3 py-1 text-xs transition-colors ${
+                    active
+                      ? "border-accent bg-accent/10 text-accent"
+                      : held
+                        ? "border-amber-500/40 bg-amber-500/5 text-amber-300/80 hover:border-amber-400"
+                        : "border-border-bright text-zinc-300 hover:border-accent hover:text-text"
+                  }`}
+                >
+                  {v.label}
+                  {held && <span className="ml-1 normal-case opacity-70">⚠</span>}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setCompare((c) => !c)}
+              className="ml-auto font-mono text-[10px] uppercase tracking-widest text-muted hover:text-accent"
+            >
+              {compare ? "Hide compare" : "⇄ Compare"}
+            </button>
+          </div>
+
+          {/* side-by-side: every option at once, with Sue's verdict, pick one */}
+          {compare && (
+            <div className="mt-3 grid gap-2.5 md:grid-cols-2">
+              {variants.map((v, i) => {
+                const held = v.verdict === "hold";
+                return (
+                  <div
+                    key={i}
+                    className={`flex flex-col rounded border p-3 ${
+                      i === selected
+                        ? "border-accent bg-accent/[0.06]"
+                        : "border-border bg-panel-2"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-text">{v.label}</span>
+                      <span
+                        className={`rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${
+                          held
+                            ? "bg-amber-500/15 text-amber-300"
+                            : "bg-emerald-500/15 text-emerald-300"
+                        }`}
+                      >
+                        {held ? "Sue held" : "Sue ok"}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setSelected(i);
+                          setCompare(false);
+                        }}
+                        className="ml-auto rounded border border-border-bright px-2 py-0.5 text-[11px] text-zinc-300 hover:border-accent hover:text-accent"
+                      >
+                        Use this
+                      </button>
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">
+                      {bodies[i]}
+                    </p>
+                    {held && v.note && (
+                      <p className="mt-2 text-[11px] text-amber-300/90">⚠ {v.note}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

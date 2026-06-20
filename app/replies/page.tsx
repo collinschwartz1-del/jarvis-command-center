@@ -1,5 +1,6 @@
 import { getPendingReplies } from "@/lib/queries";
-import { ReplyCard } from "@/components/reply-card";
+import { RepliesBoard } from "@/components/replies-board";
+import { ReplyReconciler } from "@/components/reply-reconciler";
 import { MetricTile } from "@/components/metric-tile";
 import { PageHeader, Empty } from "@/components/ui";
 
@@ -25,12 +26,10 @@ export default async function RepliesPage() {
         <MetricTile label="Sensitive" value={sensitive} sub="review closely" />
       </div>
 
+      <ReplyReconciler />
+
       {replies.length ? (
-        <div className="grid gap-4">
-          {replies.map((r) => (
-            <ReplyCard key={r.id} draft={r} />
-          ))}
-        </div>
+        <RepliesBoard drafts={replies} />
       ) : (
         <Empty>
           No replies waiting. Run the reply drafter (pulls the last 48h, drafts

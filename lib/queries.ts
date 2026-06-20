@@ -7,6 +7,7 @@ import type {
   Handoff,
   Metric,
   Activity,
+  ActionItem as ActionItemT,
   EmailBrief,
   EmailDraft,
   DraftVariant,
@@ -96,12 +97,28 @@ export async function getEmailBriefs(): Promise<EmailBrief[]> {
     .from("email_briefs")
     .select("*")
     .order("latest_at", { ascending: false });
-  // action_items is a JSONB column and can come back null; normalize to an
-  // array so every render site (.filter/.map/.length) is safe.
+  // action_items is JSONB written inconsistently by the intel cron: sometimes a
+  // string[] (legacy), sometimes a {text,done}[] (current), sometimes null.
+  // Normalize every element to {text,done} so the UI + actions never choke on a
+  // bare string (the old crash: "Cannot create property 'done' on string").
   return (data ?? []).map((b) => ({
     ...b,
-    action_items: Array.isArray(b.action_items) ? b.action_items : [],
+    action_items: normalizeActionItems(b.action_items),
   }));
+}
+
+export function normalizeActionItems(raw: unknown): ActionItemT[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((a) =>
+      typeof a === "string"
+        ? { text: a, done: false }
+        : {
+            text: String((a as { text?: unknown })?.text ?? ""),
+            done: !!(a as { done?: unknown })?.done,
+          }
+    )
+    .filter((a) => a.text.trim().length > 0);
 }
 
 // Reply drafts for the /replies approval queue — every reply-needed thread that's
@@ -168,6 +185,20 @@ export async function getActivity(limit = 12): Promise<Activity[]> {
     .order("at", { ascending: false })
     .limit(limit);
   return data ?? [];
+}
+
+// The freshest morning-sync timestamp — sync.mjs writes a `sync_run` activity
+// row every time the daily pipeline lands data. This is the system's heartbeat:
+// if it's old, the dashboard you're looking at is stale. Surfaced in the ribbon.
+export async function getLastSync(): Promise<string | null> {
+  const { data } = await supabaseAdmin()
+    .from("activity")
+    .select("at")
+    .eq("kind", "sync_run")
+    .order("at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.at ?? null;
 }
 
 // ---------- LLS (Liquid Lending Solutions) ----------

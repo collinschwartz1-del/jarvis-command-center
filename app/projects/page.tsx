@@ -1,17 +1,8 @@
 import { getCards } from "@/lib/queries";
-import { CardItem } from "@/components/card-item";
-import { PageHeader, SectionLabel, Empty } from "@/components/ui";
-import type { CardStatus } from "@/lib/types";
+import { ProjectsBoard } from "@/components/projects-board";
+import { PageHeader, Empty } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
-
-const GROUPS: { status: CardStatus; label: string }[] = [
-  { status: "pending", label: "Pending" },
-  { status: "approved", label: "Approved" },
-  { status: "review", label: "In Review" },
-  { status: "done", label: "Done" },
-  { status: "dismissed", label: "Dismissed" },
-];
 
 export default async function ProjectsPage() {
   const cards = await getCards();
@@ -29,25 +20,11 @@ export default async function ProjectsPage() {
         executes them) is the Phase 4 runner.
       </p>
 
-      <div className="space-y-8">
-        {GROUPS.map((g) => {
-          const group = cards.filter((c) => c.status === g.status);
-          if (!group.length) return null;
-          return (
-            <section key={g.status}>
-              <SectionLabel>
-                {g.label} · {group.length}
-              </SectionLabel>
-              <div className="grid gap-3 md:grid-cols-2">
-                {group.map((c) => (
-                  <CardItem key={c.id} card={c} />
-                ))}
-              </div>
-            </section>
-          );
-        })}
-        {!cards.length && <Empty>No cards staged yet.</Empty>}
-      </div>
+      {cards.length ? (
+        <ProjectsBoard cards={cards} />
+      ) : (
+        <Empty>No cards staged yet.</Empty>
+      )}
     </div>
   );
 }

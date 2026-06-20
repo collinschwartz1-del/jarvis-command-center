@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import { runLwUnderwriting } from "@/lib/underwrite";
+import { requireOwner } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,12 @@ export const dynamic = "force-dynamic";
 //                in place, so the 1-click "Run underwriting" doesn't duplicate
 //                the stub the intel cron created.
 export async function POST(req: Request) {
+  // Owner-only: runs paid underwriting and writes deal_analyses.
+  try {
+    await requireOwner();
+  } catch {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   if (!process.env.ANTHROPIC_API_KEY) {
     return Response.json(
       { error: "ANTHROPIC_API_KEY is not set. Add it to .env.local and restart." },

@@ -14,6 +14,7 @@ const LINKS = [
   { href: "/texts", label: "Texts" },
   { href: "/lending", label: "LLS" },
   { href: "/bridge", label: "Bridge" },
+  { href: "/trends", label: "Trends" },
   { href: "/ask", label: "Ask" },
 ];
 
@@ -31,7 +32,7 @@ export function Nav() {
             COMMAND CENTER
           </span>
         </Link>
-        <nav className="ml-auto flex items-center gap-0.5">
+        <nav className="ml-auto flex items-center gap-0.5 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {LINKS.map((l) => {
             const active = l.href === "/" ? path === "/" : path.startsWith(l.href);
             return (
