@@ -10,12 +10,15 @@ set -euo pipefail
 # cron runs with a bare PATH — add where node/npm/claude actually live.
 export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
-JARVIS_DIR="$HOME/Desktop/jarvis"
+JARVIS_DIR="$HOME/Developer/jarvis-brain"   # moved off Desktop (macOS TCC blocked cron from Desktop). sync.mjs reads this via .env.local.
 CC_DIR="$HOME/Developer/jarvis-command-center"
 
-# 1. Run a Board pass headlessly (requires the `claude` CLI, logged in).
-cd "$JARVIS_DIR"
-claude -p "/board" || echo "board pass failed — continuing"
+# 1. (RETIRED 2026-06-20) The `claude -p /board` brief-generation pass was removed.
+#    Cowork's "CEO Daily Briefing TITAN" now owns the morning brief, and the
+#    interactive `claude -p` agent could not auth its MCP connectors under cron
+#    (the reason intel/draft-replies below were rebuilt as credential-based
+#    .mjs scripts). Card INTAKE (brief -> cards) is being ported to a .mjs step
+#    on the same pattern; until then, sync (step 4) mirrors existing brain cards.
 
 # 2. Refresh command-center intel: inbox summaries + deal flags.
 #    Headless + credential-based (no MCP) — see scripts/intel.mjs. The old
