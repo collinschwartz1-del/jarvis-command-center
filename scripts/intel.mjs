@@ -167,10 +167,13 @@ async function fetchM365() {
 // ---------- Claude: summarize by person + flag deals ----------
 // Web access for enrichment is opt-in (INTEL_WEB=1) so the daily cron doesn't
 // silently incur search cost/latency. When off, summarize from the email text only.
+// Cost-guard: even when on, each run is capped at INTEL_WEB_MAX uses per tool
+// (default 5) so a single cron run can never run away on search/fetch cost.
 const WEB = process.env.INTEL_WEB === "1";
+const WEB_MAX = Math.max(1, parseInt(process.env.INTEL_WEB_MAX || "5", 10) || 5);
 const WEB_TOOLS = [
-  { type: "web_search_20260209", name: "web_search" },
-  { type: "web_fetch_20260209", name: "web_fetch" },
+  { type: "web_search_20260209", name: "web_search", max_uses: WEB_MAX },
+  { type: "web_fetch_20260209", name: "web_fetch", max_uses: WEB_MAX },
 ];
 
 const SYS = `You are Jarvis's inbox analyst. You receive raw recent emails. You NEVER send, reply, or act — you only summarize and flag. Be terse and decision-grade. Facts only — summarize what the emails actually say; do not speculate or insert opinion, and never invent details that aren't in the email. If something is your inference, mark it as such. Skip pure marketing/newsletters/automated noise. Group by sender (person_email). Output STRICT JSON only, matching the schema given. For any email about a real estate deal (multifamily, SFH/flip, land), add a deals[] entry. For any email about a wire, new/changed payment instructions, or bank-detail change, set wire_flag:true on that person and add an action_item starting with "WIRE-VERIFY:".${
