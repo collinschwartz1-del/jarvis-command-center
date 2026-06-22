@@ -55,4 +55,23 @@ npm run sync
 cd "$CC_DIR"
 node scripts/opportunity-report.mjs || echo "opportunity-report skipped (see log)"
 
+# 6. Omaha Deal Engine — autonomous nightly refresh (one spine, every engine).
+#    a) pull newly-qualified A/B/C leads from the Opportunity Engine brain → spine
+#       (idempotent; dedups). b) auto-skip-trace untraced Tier A/B via BatchData,
+#       bounded nightly spend (SKIPTRACE_NIGHTLY, default 250 ≈ $25/night; no-op if
+#       BatchData balance is 0). c) text-intel local intake (Ollama; degrades if
+#       absent). d) rebuild the brief from the live spine. All read creds from
+#       deal-engine/.env. Lead alerts to Collin+Tyler stay OUT of cron until
+#       ALERTS_LIVE=1 (then add the lead-alerts --send line).
+DEAL_DIR="$HOME/Downloads/sue-build-v3/deal-engine"
+if [ -d "$DEAL_DIR" ]; then
+  node "$DEAL_DIR/bulk-ingest-from-oppengine.mjs"                       || echo "deal bulk-ingest skipped (see log)"
+  node "$DEAL_DIR/skiptrace-batchdata.mjs" --tier AB --limit "${SKIPTRACE_NIGHTLY:-250}" || echo "deal skip-trace skipped (see log)"
+  node "$DEAL_DIR/text-intel-intake.mjs"                                || echo "text-intel intake skipped (see log)"
+  node "$DEAL_DIR/generate-brief.mjs"                                   || echo "deal-brief generate skipped (see log)"
+  if [ "${ALERTS_LIVE:-0}" = "1" ]; then
+    node "$CC_DIR/scripts/lead-alerts.mjs" --send                       || echo "lead-alerts skipped (see log)"
+  fi
+fi
+
 echo "morning-board done: $(date)"

@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogOut } from "lucide-react";
+import type { Role } from "@/lib/roles";
 
 const LINKS = [
   { href: "/", label: "Core" },
+  { href: "/sourcing", label: "Deals" },
   { href: "/inbox", label: "Inbox" },
   { href: "/replies", label: "Replies" },
   { href: "/agents", label: "Agents" },
@@ -18,8 +20,10 @@ const LINKS = [
   { href: "/ask", label: "Ask" },
 ];
 
-export function Nav() {
+export function Nav({ role }: { role?: Role | null }) {
   const path = usePathname();
+  // A caller (dialing VA) only ever sees the Deals tab.
+  const links = role === "caller" ? LINKS.filter((l) => l.href === "/sourcing") : LINKS;
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-bg/80 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-5">
@@ -33,7 +37,7 @@ export function Nav() {
           </span>
         </Link>
         <nav className="ml-auto flex items-center gap-0.5 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {LINKS.map((l) => {
+          {links.map((l) => {
             const active = l.href === "/" ? path === "/" : path.startsWith(l.href);
             return (
               <Link

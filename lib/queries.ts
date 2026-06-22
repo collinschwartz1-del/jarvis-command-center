@@ -9,6 +9,8 @@ import type {
   Activity,
   ActionItem as ActionItemT,
   EmailBrief,
+  InboxCategory,
+  InboxMuted,
   EmailDraft,
   DraftVariant,
   DealAnalysis,
@@ -101,10 +103,23 @@ export async function getEmailBriefs(): Promise<EmailBrief[]> {
   // string[] (legacy), sometimes a {text,done}[] (current), sometimes null.
   // Normalize every element to {text,done} so the UI + actions never choke on a
   // bare string (the old crash: "Cannot create property 'done' on string").
+  const CATS: InboxCategory[] = ["sign", "question", "awaiting", "fyi"];
   return (data ?? []).map((b) => ({
     ...b,
+    // category is new (migration 0009); legacy rows + bad values fall back to fyi.
+    category: CATS.includes(b.category) ? (b.category as InboxCategory) : "fyi",
     action_items: normalizeActionItems(b.action_items),
   }));
+}
+
+// Machine-noise Jarvis suppressed this window — audit list behind the /inbox
+// "N muted" counter. Server-side only (RLS-locked table).
+export async function getMutedInbox(): Promise<InboxMuted[]> {
+  const { data } = await supabaseAdmin()
+    .from("inbox_muted")
+    .select("*")
+    .order("muted_at", { ascending: false });
+  return data ?? [];
 }
 
 export function normalizeActionItems(raw: unknown): ActionItemT[] {

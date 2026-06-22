@@ -100,6 +100,9 @@ export interface ActionItem {
   done: boolean;
 }
 
+// The triage bucket — what Collin needs to do. Drives the /inbox grouping.
+export type InboxCategory = "sign" | "question" | "awaiting" | "fyi";
+
 export interface EmailBrief {
   id: string;
   person_name: string;
@@ -107,12 +110,24 @@ export interface EmailBrief {
   mailbox: string;
   thread_count: number;
   latest_at: string | null;
+  category: InboxCategory;
   summary: string;
   takeaways: string[];
   action_items: ActionItem[];
   subjects: string[];
   created_at: string;
   updated_at: string;
+}
+
+// One machine-noise message Jarvis suppressed from the Inbox this window. Audit
+// only — muting never touches Gmail. Powers the "N muted" counter on /inbox.
+export interface InboxMuted {
+  id: string;
+  from_name: string | null;
+  from_email: string | null;
+  subject: string | null;
+  reason: string | null; // sender:<x> | pattern:<x>
+  muted_at: string;
 }
 
 // One prepopulated reply option. Single-reply threads have exactly one variant;

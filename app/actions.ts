@@ -9,6 +9,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { requireOwner } from "@/lib/auth";
 import { gmailToken, writeGmailDraft, getThreadState } from "@/lib/gmail";
 import { normalizeActionItems } from "@/lib/queries";
+import { actionSignature, isWireItem } from "@/lib/inbox-rules.mjs";
 import type { CardStatus } from "@/lib/types";
 
 // Phase 3 + 4 — write card decisions back to BOTH Supabase and the markdown
@@ -435,7 +436,10 @@ export async function combineIntoProject(
   revalidatePath("/");
 }
 
-// Acknowledge an item without making a card (clears it, logs the signal).
+// Acknowledge an item without making a card (clears it, logs the signal) AND
+// remembers it so the next intel cron can't re-raise it. This is the fix for the
+// Kathleen-Miller re-nag: dismissing a WIRE-VERIFY here records a 'wire'
+// suppression for that person, so any future wire flag from them stays dead.
 export async function dismissActionItem(briefId: string, index: number) {
   await requireOwner();
   const db = supabaseAdmin();
@@ -443,12 +447,25 @@ export async function dismissActionItem(briefId: string, index: number) {
   const item = brief?.items[index];
   if (!brief || !item) return;
   await setItemsDone(briefId, [index]);
+
+  // Persistent "I already handled this" memory.
+  const wire = isWireItem(item.text);
+  await db.from("inbox_suppressions").upsert(
+    {
+      person_email: brief.person_email.toLowerCase(),
+      signature: wire ? "wire" : actionSignature(item.text),
+      kind: wire ? "wire" : "action",
+      reason: `dismissed from ${brief.person_name}`,
+    },
+    { onConflict: "person_email,signature" }
+  );
+
   await db.from("activity").insert({
     actor: "collin",
     kind: "inbox_dismissed",
     ref_table: "email_briefs",
     ref_id: briefId,
-    summary: `Cleared (no card) from ${brief.person_name}: ${item.text.slice(0, 60)}`,
+    summary: `Cleared${wire ? " (wire flag silenced)" : ""} from ${brief.person_name}: ${item.text.slice(0, 60)}`,
   });
   revalidatePath("/inbox");
 }

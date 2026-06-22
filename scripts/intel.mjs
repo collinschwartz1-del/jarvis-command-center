@@ -20,6 +20,12 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
+import {
+  classifyNoise,
+  actionSignature,
+  isWireItem,
+  INBOX_CATEGORIES,
+} from "../lib/inbox-rules.mjs";
 
 // --- env (same loader as sync.mjs) ---
 function loadEnv() {
@@ -104,10 +110,15 @@ async function fetchGmail() {
     const from = header(m.payload, "From");
     const email = (from.match(/<(.+?)>/)?.[1] || from).trim().toLowerCase();
     const name = from.replace(/<.+?>/, "").replace(/"/g, "").trim() || email;
+    // Direction: outbound messages carry the SENT label. Feeding this to the
+    // classifier lets it tell "they're asking me" (question) from "I'm waiting
+    // to hear back" (awaiting) instead of guessing from prose alone.
+    const from_me = (m.labelIds || []).includes("SENT");
     out.push({
       mailbox: "gmail",
       from_name: name,
       from_email: email,
+      from_me,
       subject: header(m.payload, "Subject"),
       date: header(m.payload, "Date"),
       snippet: m.snippet || "",
@@ -176,7 +187,16 @@ const WEB_TOOLS = [
   { type: "web_fetch_20260209", name: "web_fetch", max_uses: WEB_MAX },
 ];
 
-const SYS = `You are Jarvis's inbox analyst. You receive raw recent emails. You NEVER send, reply, or act — you only summarize and flag. Be terse and decision-grade. Facts only — summarize what the emails actually say; do not speculate or insert opinion, and never invent details that aren't in the email. If something is your inference, mark it as such. Skip pure marketing/newsletters/automated noise. Group by sender (person_email). Output STRICT JSON only, matching the schema given. For any email about a real estate deal (multifamily, SFH/flip, land), add a deals[] entry. For any email about a wire, new/changed payment instructions, or bank-detail change, set wire_flag:true on that person and add an action_item starting with "WIRE-VERIFY:".${
+const SYS = `You are Jarvis's inbox analyst. You receive raw recent emails. You NEVER send, reply, or act — you only summarize and flag. Be terse and decision-grade. Facts only — summarize what the emails actually say; do not speculate or insert opinion, and never invent details that aren't in the email. If something is your inference, mark it as such. Skip pure marketing/newsletters/automated noise. Group by sender (person_email). Output STRICT JSON only, matching the schema given.
+
+TRIAGE — Jarvis exists so Collin acts faster, so every brief MUST carry a "category" that answers "what does Collin need to do?". Pick exactly ONE:
+- "sign": needs his signature, execution, or approval to commit/move money — loan docs, agreements, DocuSign, a wire/payment to approve. Highest priority.
+- "question": someone is asking HIM a direct question or a decision and is waiting on his answer (he is the bottleneck).
+- "awaiting": HE already replied / the ball is in their court — he's waiting to hear back. The latest message having from_me:true is the strong signal for this.
+- "fyi": informational only — nothing is owed by Collin.
+Default to "fyi" unless there is a clear action Collin owns. Only "sign" and "question" should carry action_items; for "awaiting" and "fyi" leave action_items empty unless a genuine task exists. Do not manufacture action items to look busy — an empty list is correct when nothing is owed.
+
+For any email about a real estate deal (multifamily, SFH/flip, land), add a deals[] entry. For any email about a wire, new/changed payment instructions, or bank-detail change, set wire_flag:true on that person and add an action_item starting with "WIRE-VERIFY:".${
   WEB
     ? " You have web search/fetch — use it sparingly to verify or enrich a specific factual claim (a firm, an address, a deal figure) when it materially changes the takeaway. Ground enrichments in what you find."
     : ""
@@ -185,7 +205,7 @@ const SYS = `You are Jarvis's inbox analyst. You receive raw recent emails. You 
 function userPrompt(msgs) {
   const compact = msgs.map((m, i) => ({
     i, mailbox: m.mailbox, from_name: m.from_name, from_email: m.from_email,
-    subject: m.subject, date: m.date,
+    subject: m.subject, date: m.date, from_me: !!m.from_me,
     has_attachment: m.has_attachment,
     text: (m.body || m.snippet || "").slice(0, 1500),
   }));
@@ -193,6 +213,7 @@ function userPrompt(msgs) {
 `Return STRICT JSON:
 {
  "briefs":[{"person_name","person_email","mailbox","thread_count":int,"latest_at":ISO8601,
+   "category":"sign|question|awaiting|fyi",
    "summary":"1-3 sentences","takeaways":[".."],"action_items":[".."],"subjects":[".."],"wire_flag":bool}],
  "deals":[{"deal_name","address","asset_type":"multifamily|flip|land","source":"email",
    "units":int|null,"price":number|null,"verdict":"needs-underwrite",
@@ -222,20 +243,79 @@ async function analyze(msgs) {
 }
 
 // ---------- upserts ----------
+// Collin's "I already handled this" memory: a map of person_email → the set of
+// action signatures he's dismissed, plus whether he's cleared a wire flag. Built
+// once per run and applied during upsert so the cron can never re-raise an item
+// he already killed (the Kathleen-Miller wire re-nag).
+async function loadSuppressions() {
+  const { data } = await db
+    .from("inbox_suppressions")
+    .select("person_email, signature, kind");
+  const map = new Map();
+  for (const r of data || []) {
+    const email = String(r.person_email || "").toLowerCase();
+    if (!email) continue;
+    if (!map.has(email)) map.set(email, { sigs: new Set(), wire: false });
+    const e = map.get(email);
+    if (r.kind === "wire") e.wire = true;
+    e.sigs.add(r.signature);
+  }
+  return map;
+}
+
+// Normalize whatever's already stored on a brief's action_items (legacy string[]
+// or {text,done}[]) to {text,done}[] so we can preserve done-state across runs.
+function priorItems(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((a) =>
+    typeof a === "string" ? { text: a, done: false } : { text: String(a?.text ?? ""), done: !!a?.done }
+  );
+}
+
 async function upsertBriefs(briefs) {
+  const supp = await loadSuppressions();
   let n = 0;
   for (const b of briefs || []) {
     if (!b.person_email) continue;
+    const email = b.person_email.toLowerCase();
+    const s = supp.get(email);
+
+    // Preserve done-state: if Collin checked an item off, a fresh cron run that
+    // re-surfaces the same item should keep it done, not reopen it.
+    const { data: prev } = await db
+      .from("email_briefs")
+      .select("action_items")
+      .eq("person_email", email)
+      .maybeSingle();
+    const doneSigs = new Set(
+      priorItems(prev?.action_items).filter((a) => a.done).map((a) => actionSignature(a.text))
+    );
+
+    // Build the item list: drop anything he permanently dismissed, drop wire
+    // re-raises once he's cleared a wire flag, carry done-state forward.
+    const items = [];
+    for (const raw of b.action_items || []) {
+      const text = typeof raw === "string" ? raw : String(raw?.text ?? "");
+      if (!text.trim()) continue;
+      const sig = actionSignature(text);
+      if (s && s.sigs.has(sig)) continue;
+      if (s && s.wire && isWireItem(text)) continue;
+      items.push({ text, done: doneSigs.has(sig) });
+    }
+
+    const category = INBOX_CATEGORIES.includes(b.category) ? b.category : "fyi";
+
     const { error } = await db.from("email_briefs").upsert(
       {
-        person_name: b.person_name || b.person_email,
-        person_email: b.person_email.toLowerCase(),
+        person_name: b.person_name || email,
+        person_email: email,
         mailbox: b.mailbox || "gmail",
         thread_count: b.thread_count ?? null,
         latest_at: b.latest_at || null,
+        category,
         summary: b.summary || "",
         takeaways: b.takeaways || [],
-        action_items: b.action_items || [],
+        action_items: items,
         subjects: b.subjects || [],
         updated_at: new Date().toISOString(),
       },
@@ -270,16 +350,52 @@ async function upsertDeals(deals) {
   return n;
 }
 
+// Record the machine-noise Jarvis suppressed this window. Represents the CURRENT
+// 48h view (cleared and rewritten each run), so the /inbox "N muted" counter and
+// its audit list always reflect what's hidden right now. NEVER touches Gmail.
+async function recordMuted(muted) {
+  await db.from("inbox_muted").delete().not("id", "is", null); // clear prior window
+  if (!muted.length) {
+    console.log("intel: 0 muted this window.");
+    return;
+  }
+  const rows = muted.map((m) => ({
+    from_name: m.from_name || null,
+    from_email: m.from_email || null,
+    subject: m.subject || null,
+    reason: m._mute_reason || null,
+  }));
+  const { error } = await db.from("inbox_muted").insert(rows);
+  if (error) console.error("intel: inbox_muted insert error", error.message);
+  console.log(`intel: 🔇 suppressed ${muted.length} machine-noise message(s).`);
+}
+
 // ---------- main ----------
 async function main() {
   const sources = await Promise.allSettled([fetchGmail(), fetchM365()]);
-  const msgs = sources.flatMap((s) => (s.status === "fulfilled" ? s.value : []));
+  const all = sources.flatMap((s) => (s.status === "fulfilled" ? s.value : []));
   for (const s of sources)
     if (s.status === "rejected") console.error("intel: source failed:", s.reason?.message || s.reason);
-  if (!msgs.length) {
+  if (!all.length) {
     console.log("intel: no messages pulled (check credentials). Nothing to do.");
     return;
   }
+
+  // Move 1 — deterministic noise filter: drop infra/automation/self-sends BEFORE
+  // Claude ever sees them. Cheaper (fewer tokens) and the brief stays signal-only.
+  const msgs = [];
+  const muted = [];
+  for (const m of all) {
+    const { muted: isMuted, reason } = classifyNoise(m);
+    if (isMuted) muted.push({ ...m, _mute_reason: reason });
+    else msgs.push(m);
+  }
+  await recordMuted(muted);
+  if (!msgs.length) {
+    console.log("intel: every message this window was machine noise. Nothing to summarize.");
+    return;
+  }
+
   const { briefs, deals } = await analyze(msgs);
   const nb = await upsertBriefs(briefs);
   const nd = await upsertDeals(deals);

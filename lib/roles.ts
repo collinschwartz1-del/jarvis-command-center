@@ -1,17 +1,23 @@
 // Pure role logic — no Supabase, no next/headers imports, so this is safe to
 // import from edge middleware as well as server components/routes.
 //
-// Two roles:
+// Three roles:
 //   owner  — full read/write (Collin). Can approve cards, route deals, etc.
 //   viewer — read-only (Karen, EA). Sees everything, can mutate nothing.
+//   caller — SCOPED to /sourcing only (the dialing VA). Can work the call queue
+//            and log dispositions, but cannot see/reach any other tab or data.
 //
 // Env (comma-separated emails):
 //   OWNER_EMAILS   — defaults to Collin's two addresses. Falls back to the
 //                    legacy ALLOWED_EMAILS so existing deploys keep working
 //                    (everyone previously allowed stays an owner).
 //   VIEWER_EMAILS  — defaults to Karen.
+//   CALLER_EMAILS  — the dialing VA(s). No default — empty until set.
 
-export type Role = "owner" | "viewer";
+export type Role = "owner" | "viewer" | "caller";
+
+// Paths a `caller` may reach. Everything else redirects to /sourcing.
+const CALLER_PATHS = ["/sourcing", "/auth", "/login"];
 
 function parse(list: string | undefined): string[] {
   return (list ?? "")
@@ -32,9 +38,13 @@ export function viewerEmails(): string[] {
   return parse(process.env.VIEWER_EMAILS ?? "karen@leavenwealth.com");
 }
 
-// Anyone who can reach the command center at all (owners ∪ viewers).
+export function callerEmails(): string[] {
+  return parse(process.env.CALLER_EMAILS);
+}
+
+// Anyone who can reach the command center at all (owners ∪ viewers ∪ callers).
 export function allowedEmails(): string[] {
-  return [...ownerEmails(), ...viewerEmails()];
+  return [...ownerEmails(), ...viewerEmails(), ...callerEmails()];
 }
 
 export function roleOf(email?: string | null): Role | null {
@@ -42,6 +52,7 @@ export function roleOf(email?: string | null): Role | null {
   const e = email.toLowerCase();
   if (ownerEmails().includes(e)) return "owner";
   if (viewerEmails().includes(e)) return "viewer";
+  if (callerEmails().includes(e)) return "caller";
   return null;
 }
 
@@ -51,6 +62,24 @@ export function isAllowed(email?: string | null): boolean {
 
 export function isOwner(email?: string | null): boolean {
   return roleOf(email) === "owner";
+}
+
+export function isCaller(email?: string | null): boolean {
+  return roleOf(email) === "caller";
+}
+
+// Where a role lands by default (callers never see the Core dashboard).
+export function homePathFor(role: Role | null): string {
+  return role === "caller" ? "/sourcing" : "/";
+}
+
+// Route-level gate. Owners/viewers may reach anything; callers are confined to
+// CALLER_PATHS. Pure string logic so middleware (edge) can call it.
+export function canAccessPath(role: Role | null, path: string): boolean {
+  if (role === "caller") {
+    return CALLER_PATHS.some((p) => path === p || path.startsWith(p + "/"));
+  }
+  return role === "owner" || role === "viewer";
 }
 
 // Local-dev bypass. When Jarvis runs via `npm run dev` on Collin's own Mac, skip

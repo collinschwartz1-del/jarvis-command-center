@@ -26,10 +26,44 @@ const MAILBOX: Record<string, string> = {
   both: "text-amber-300 border-amber-500/30 bg-amber-500/10",
 };
 
-export function EmailBriefCard({ brief }: { brief: EmailBrief }) {
+export function EmailBriefCard({
+  brief,
+  compact = false,
+}: {
+  brief: EmailBrief;
+  compact?: boolean;
+}) {
   const canWrite = useCanWrite();
   const [pending, start] = useTransition();
   const items = brief.action_items ?? [];
+
+  // FYI / awareness rows render as a single quiet line — readable at a glance,
+  // no action surface. Collin scans these, he doesn't work them.
+  if (compact) {
+    return (
+      <div className="flex items-baseline gap-2.5 rounded border border-border bg-panel px-3 py-2">
+        <Mail size={12} className="shrink-0 translate-y-0.5 text-muted" />
+        <span className="shrink-0 text-sm font-medium text-zinc-300">
+          {brief.person_name}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-muted">
+          {brief.summary}
+        </span>
+        {brief.latest_at && (
+          <span className="shrink-0 font-mono text-[10px] text-border-bright">
+            {timeAgo(brief.latest_at)}
+          </span>
+        )}
+        <Link
+          href="/replies"
+          className="shrink-0 text-muted transition-colors hover:text-accent"
+          title="Reply"
+        >
+          <MessageSquareReply size={12} />
+        </Link>
+      </div>
+    );
+  }
 
   // indexes handled this session (optimistic) + a multi-select set for bundling
   const [resolved, setResolved] = useState<Set<number>>(new Set());

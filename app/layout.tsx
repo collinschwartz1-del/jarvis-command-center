@@ -41,14 +41,15 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const canWrite = (await currentRole()) === "owner";
+  const role = await currentRole();
+  const canWrite = role === "owner";
   return (
     <html lang="en" className={`${display.variable} ${mono.variable}`}>
       <body>
         <RoleProvider canWrite={canWrite}>
           <ServiceWorkerRegister />
           <StatusRibbon />
-          <Nav />
+          <Nav role={role} />
           <main className="mx-auto max-w-6xl px-6 py-10">{children}</main>
         </RoleProvider>
       </body>

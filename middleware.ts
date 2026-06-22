@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { devOwnerEmail, isAllowed } from "@/lib/roles";
+import { devOwnerEmail, isAllowed, roleOf, canAccessPath, homePathFor } from "@/lib/roles";
 
 // Gate every route (pages + API) behind an authed, allowlisted session.
 // Public: /login and /auth/*.
@@ -44,7 +44,18 @@ export async function middleware(req: NextRequest) {
 
   if (ok && isPublic && path.startsWith("/login")) {
     const url = req.nextUrl.clone();
-    url.pathname = "/";
+    url.pathname = homePathFor(roleOf(user!.email));
+    return NextResponse.redirect(url);
+  }
+
+  // Role scoping: a `caller` (dialing VA) is confined to /sourcing. Any other
+  // route bounces to the call queue — API calls outside scope get 403.
+  if (ok && !isPublic && !canAccessPath(roleOf(user!.email), path)) {
+    if (path.startsWith("/api")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const url = req.nextUrl.clone();
+    url.pathname = "/sourcing";
     return NextResponse.redirect(url);
   }
 
