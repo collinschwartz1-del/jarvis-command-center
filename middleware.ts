@@ -39,6 +39,12 @@ export async function middleware(req: NextRequest) {
     if (path.startsWith("/api")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    // A valid session that simply isn't on the allowlist is a *different* failure
+    // than "no session" — surface it so the user knows it's the email, not the link.
+    if (user && !isAllowed(user.email)) {
+      url.searchParams.set("error", "not_authorized");
+      if (user.email) url.searchParams.set("email", user.email);
+    }
     return NextResponse.redirect(url);
   }
 

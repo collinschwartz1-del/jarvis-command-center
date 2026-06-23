@@ -1,0 +1,46 @@
+name: PGO Weekly Report
+
+# Friday weekly portfolio report: computes the figures from BigQuery, renders a
+# PDF to Google Drive, emails it to Collin, and records it in pgo_reports so
+# /pgo lists it. The Obsidian vault note is skipped in the cloud (PGO_SKIP_VAULT)
+# — the local vault isn't reachable here; the Drive PDF + email cover it.
+#
+# Schedule is UTC (GitHub cron has no DST). 21:30 UTC Fri = 4:30pm CDT / 3:30pm CST.
+
+on:
+  schedule:
+    - cron: "30 21 * * 5"
+  workflow_dispatch: {}
+
+concurrency:
+  group: pgo-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Write BigQuery service-account key
+        run: printf '%s' "$PGO_BQ_SA_JSON" > "$RUNNER_TEMP/pgo-sa.json"
+        env:
+          PGO_BQ_SA_JSON: ${{ secrets.PGO_BQ_SA_JSON }}
+      - name: Run weekly report
+        run: node scripts/pgo-weekly-report.mjs
+        env:
+          PGO_SKIP_VAULT: "1"
+          PGO_BQ_KEY_PATH: ${{ runner.temp }}/pgo-sa.json
+          PGO_BQ_BILLING_PROJECT: ${{ secrets.PGO_BQ_BILLING_PROJECT }}
+          PGO_BQ_DATASET: ${{ secrets.PGO_BQ_DATASET }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          GDRIVE_PGO_FOLDER_ID: ${{ secrets.GDRIVE_PGO_FOLDER_ID }}
+          PGO_REPORT_TO: ${{ secrets.PGO_REPORT_TO }}

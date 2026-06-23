@@ -13,11 +13,14 @@
     "draft-replies": "node scripts/draft-replies.mjs",
     "lls-sync": "node scripts/lls-sync.mjs",
     "lls-report": "node scripts/lls-monthly-report.mjs",
+    "pgo-sync": "node scripts/pgo-sync.mjs",
+    "pgo-report": "node scripts/pgo-weekly-report.mjs",
     "gmail-auth": "node scripts/gmail-auth.mjs",
     "import-folio": "node scripts/import-folio.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",
+    "@google-cloud/bigquery": "^8.3.1",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.0",
     "lucide-react": "0.456.0",

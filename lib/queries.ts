@@ -21,6 +21,9 @@ import type {
   LlsLoanComment,
   LlsInboxItem,
   LlsReport,
+  PgoSnapshot,
+  PgoProperty,
+  PgoReport,
 } from "./types";
 
 export async function getAgents(): Promise<Agent[]> {
@@ -273,4 +276,33 @@ export async function getLlsReports(limit = 12): Promise<LlsReport[]> {
     .order("period", { ascending: false })
     .limit(limit);
   return data ?? [];
+}
+
+// ---- PGO (Point Guard Omaha) ----
+
+export async function getPgoSnapshot(): Promise<PgoSnapshot | null> {
+  const { data } = await supabaseAdmin()
+    .from("pgo_snapshot")
+    .select("*")
+    .order("captured_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as PgoSnapshot) ?? null;
+}
+
+export async function getPgoProperties(): Promise<PgoProperty[]> {
+  const { data } = await supabaseAdmin()
+    .from("pgo_properties")
+    .select("*")
+    .order("noi", { ascending: false, nullsFirst: false });
+  return (data as PgoProperty[]) ?? [];
+}
+
+export async function getPgoReports(limit = 12): Promise<PgoReport[]> {
+  const { data } = await supabaseAdmin()
+    .from("pgo_reports")
+    .select("*")
+    .order("period", { ascending: false })
+    .limit(limit);
+  return (data as PgoReport[]) ?? [];
 }

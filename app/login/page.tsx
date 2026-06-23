@@ -1,10 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Mail } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 
-export default function LoginPage() {
+function LoginInner() {
+  const params = useSearchParams();
+  const reason = params.get("error");
+  const rejectedEmail = params.get("email");
+  // A failed sign-in used to dump the user back here with no explanation.
+  // Name the actual failure so they can fix it without a 60-message thread.
+  const notice =
+    reason === "not_authorized"
+      ? `${rejectedEmail ? `“${rejectedEmail}”` : "That email"} isn't on the access list. Sign in with the exact address Collin approved — or ask him to add this one.`
+      : reason === "link"
+        ? "That sign-in link was already used or expired. Corporate inboxes (Outlook / Defender Safe Links) sometimes pre-open links and burn them — request a fresh one below and open it on this device."
+        : null;
+
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -36,6 +49,12 @@ export default function LoginPage() {
             COMMAND CENTER
           </span>
         </div>
+
+        {notice && (
+          <p className="mt-5 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-300">
+            {notice}
+          </p>
+        )}
 
         {sent ? (
           <div className="mt-6">
@@ -72,5 +91,14 @@ export default function LoginPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  // useSearchParams needs a Suspense boundary under Next 15's prerender.
+  return (
+    <Suspense fallback={null}>
+      <LoginInner />
+    </Suspense>
   );
 }
