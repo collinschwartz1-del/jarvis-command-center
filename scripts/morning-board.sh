@@ -79,6 +79,7 @@ if [ -d "$DEAL_DIR" ]; then
   node "$DEAL_DIR/skiptrace-batchdata.mjs" --tier AB --limit "${SKIPTRACE_NIGHTLY:-250}" || echo "deal skip-trace skipped (see log)"
   node "$DEAL_DIR/text-intel-intake.mjs"                                || echo "text-intel intake skipped (see log)"
   node "$DEAL_DIR/generate-brief.mjs"                                   || echo "deal-brief generate skipped (see log)"
+  node "$DEAL_DIR/generate-atlas.mjs"                                   || echo "system-atlas generate skipped (see log)"
   if [ "${ALERTS_LIVE:-0}" = "1" ]; then
     node "$CC_DIR/scripts/lead-alerts.mjs" --send                       || echo "lead-alerts skipped (see log)"
   fi
