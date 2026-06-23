@@ -1,0 +1,17 @@
+{
+  "note": "Website-pitch-pilot prospects. intel.mjs (7am morning cron) tags any inbound reply from these addresses with '📨 WEBSITE PILOT', rescues it from the noise filter, and surfaces it in the action bucket on the Jarvis dashboard. ADD a new address here each time Collin sends more pilot emails. Source of truth for the copy/links: ~/Downloads/sue-build-v3/website-pitch-pilot/contacts/outreach-drafts.md",
+  "emails": [
+    "accurate1998@gmail.com",
+    "owner@402plumbingservices.com",
+    "info@exspurtplumbingomaha.com",
+    "jgdominski@gmail.com",
+    "hayesplumbing1@aol.com",
+    "bpaulson592@gmail.com",
+    "customvinylfab@outlook.com",
+    "alwaysdependablehandyman@gmail.com",
+    "contact@gobloomers.com",
+    "roofermike1972@yahoo.com",
+    "goodfellasgrass@gmail.com",
+    "office@completecomfortomaha.com"
+  ]
+}

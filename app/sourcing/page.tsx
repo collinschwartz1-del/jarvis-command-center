@@ -1,5 +1,5 @@
 import { PageHeader, SectionLabel, Empty } from "@/components/ui";
-import { getDailyBrief, getCallQueue, type BriefLead } from "@/lib/deal-queries";
+import { getDailyBrief, getCallQueue, getCallQueueCount, type BriefLead } from "@/lib/deal-queries";
 import { dealConfigured } from "@/lib/supabase-deal";
 import { CallQueue } from "@/components/sourcing/CallQueue";
 
@@ -38,7 +38,7 @@ function Td({ children, className = "" }: { children: React.ReactNode; className
 
 export default async function SourcingPage() {
   const configured = dealConfigured();
-  const [brief, calls] = await Promise.all([getDailyBrief(), getCallQueue()]);
+  const [brief, calls, callableTotal] = await Promise.all([getDailyBrief(), getCallQueue(), getCallQueueCount()]);
 
   const off = brief
     .filter((l) => l.source === "off_market")
@@ -82,7 +82,7 @@ export default async function SourcingPage() {
           { n: brief.length, l: "leads in queue", c: "text-sky-400" },
           { n: usd(totalEquity), l: "off-market equity capture", c: "text-emerald-400" },
           { n: approachNow, l: 'flagged "approach now"', c: "text-amber-400" },
-          { n: calls.length, l: "callable now (DNC-clean)", c: calls.length ? "text-emerald-400" : "text-muted" },
+          { n: callableTotal, l: "callable now (DNC-clean)", c: callableTotal ? "text-emerald-400" : "text-muted" },
         ].map((s, i) => (
           <div key={i} className="rounded-xl border border-border bg-panel p-4">
             <div className={`text-2xl font-extrabold tracking-tight ${s.c}`}>{s.n}</div>
@@ -93,7 +93,7 @@ export default async function SourcingPage() {
 
       {/* call queue — the action list */}
       <section className="mb-8">
-        <SectionLabel>Call queue · DNC-clean phones ready to dial</SectionLabel>
+        <SectionLabel>Call queue · DNC-clean phones ready to dial{callableTotal > calls.length ? ` · showing top ${calls.length} of ${callableTotal} (highest equity first)` : ""}</SectionLabel>
         {calls.length === 0 ? (
           <Empty>
             No callable phones yet. Run the Batch 02 skip-trace in PropStream, then{" "}

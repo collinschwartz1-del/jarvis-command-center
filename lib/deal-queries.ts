@@ -59,14 +59,28 @@ export async function getDailyBrief(): Promise<BriefLead[]> {
   return (data ?? []) as BriefLead[];
 }
 
-export async function getCallQueue(): Promise<CallRow[]> {
+export async function getCallQueue(limit = 400): Promise<CallRow[]> {
   if (!dealConfigured()) return [];
   const { data, error } = await supabaseDeal()
     .from("v_call_queue")
-    .select("*");
+    .select("*")
+    .limit(limit);
   if (error) {
     console.error("getCallQueue:", error.message);
     return [];
   }
   return (data ?? []) as CallRow[];
+}
+
+// True total of callable rows (the queue view is capped for rendering).
+export async function getCallQueueCount(): Promise<number> {
+  if (!dealConfigured()) return 0;
+  const { count, error } = await supabaseDeal()
+    .from("v_call_queue")
+    .select("*", { count: "exact", head: true });
+  if (error) {
+    console.error("getCallQueueCount:", error.message);
+    return 0;
+  }
+  return count ?? 0;
 }

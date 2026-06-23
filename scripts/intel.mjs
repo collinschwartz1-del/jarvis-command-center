@@ -16,8 +16,9 @@
 //
 // Run:  node scripts/intel.mjs        (cron calls this)
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
 import {
@@ -51,6 +52,80 @@ const claude = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
 const SINCE_HOURS = 48;
 const sinceSec = Math.floor(Date.now() / 1000) - SINCE_HOURS * 3600;
+
+// ---------- Website-pitch-pilot reply watchlist ----------
+// Collin runs a cold-outreach pilot (free website mockups → local trades). He
+// wants any REPLY from a prospect surfaced in his first-of-day view, not buried
+// as generic "fyi". Load the address list from config/pilot-watchlist.json
+// (add a line there each time he sends more). Missing file = clean no-op.
+function loadPilotWatchlist() {
+  try {
+    const p = join(process.cwd(), "config", "pilot-watchlist.json");
+    if (!existsSync(p)) return new Set();
+    const raw = JSON.parse(readFileSync(p, "utf8"));
+    const list = Array.isArray(raw) ? raw : raw.emails || [];
+    return new Set(list.map((e) => String(e).toLowerCase().trim()).filter(Boolean));
+  } catch (e) {
+    console.error("intel: pilot watchlist load failed —", e.message);
+    return new Set();
+  }
+}
+const PILOT = loadPilotWatchlist();
+const onPilotWatchlist = (email) => !!email && PILOT.has(String(email).toLowerCase().trim());
+
+// Where the pilot tracker board lives (build-board.mjs reads replies.json from here).
+const PILOT_DIR =
+  process.env.PILOT_TRACKER_DIR ||
+  join(homedir(), "Downloads", "sue-build-v3", "website-pitch-pilot", "tracker");
+
+// Append/update a reply event so the tracker board can flip the row to "replied".
+// Keyed by email; keeps first_seen, refreshes last_seen + subject + count.
+function recordPilotReply(b) {
+  try {
+    mkdirSync(PILOT_DIR, { recursive: true });
+    const p = join(PILOT_DIR, "replies.json");
+    const map = existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : {};
+    const key = String(b.person_email).toLowerCase().trim();
+    const when = b.latest_at || new Date().toISOString();
+    const subject = (Array.isArray(b.subjects) && b.subjects[0]) || "";
+    const prev = map[key] || { first_seen: when, count: 0 };
+    map[key] = {
+      name: b.person_name || key,
+      subject,
+      first_seen: prev.first_seen || when,
+      last_seen: when,
+      count: (prev.count || 0) + 1,
+    };
+    writeFileSync(p, JSON.stringify(map, null, 2));
+  } catch (e) {
+    console.error("intel: pilot reply log failed —", e.message);
+  }
+}
+
+// After Claude classifies, make pilot replies unmistakable: prefix the summary,
+// pull them out of "fyi" into the action bucket, guarantee a do-this item, and
+// log the reply for the tracker board. Leaves "sign"/"awaiting" as classified.
+function tagPilotReplies(briefs) {
+  let hits = 0;
+  for (const b of briefs || []) {
+    if (!onPilotWatchlist(b.person_email)) continue;
+    hits++;
+    const tag = "📨 WEBSITE PILOT";
+    if (!String(b.summary || "").startsWith(tag))
+      b.summary = `${tag} — ${b.summary || "reply/activity on this outreach thread."}`;
+    if (b.category === "fyi") b.category = "question";
+    if (b.category === "question") {
+      b.action_items = Array.isArray(b.action_items) ? b.action_items : [];
+      const has = b.action_items.some((a) =>
+        /call|text|website pilot/i.test(typeof a === "string" ? a : a?.text || "")
+      );
+      if (!has) b.action_items.unshift("Website pilot reply — call/text back to advance.");
+    }
+    recordPilotReply(b);
+  }
+  if (hits) console.log(`intel: 📨 ${hits} website-pilot reply(ies) flagged.`);
+  return briefs;
+}
 
 // ---------- Gmail (REST + fetch; no googleapis dep) ----------
 async function gmailToken() {
@@ -387,7 +462,9 @@ async function main() {
   const muted = [];
   for (const m of all) {
     const { muted: isMuted, reason } = classifyNoise(m);
-    if (isMuted) muted.push({ ...m, _mute_reason: reason });
+    // Never let a pilot prospect's inbound reply get filtered as noise.
+    const pilotReply = onPilotWatchlist(m.from_email) && !m.from_me;
+    if (isMuted && !pilotReply) muted.push({ ...m, _mute_reason: reason });
     else msgs.push(m);
   }
   await recordMuted(muted);
@@ -397,6 +474,7 @@ async function main() {
   }
 
   const { briefs, deals } = await analyze(msgs);
+  tagPilotReplies(briefs);
   const nb = await upsertBriefs(briefs);
   const nd = await upsertDeals(deals);
   const wires = (briefs || []).filter((b) => b.wire_flag).map((b) => b.person_email);

@@ -30,6 +30,12 @@ node scripts/intake-cards.mjs || echo "card intake skipped (see log)"
 cd "$CC_DIR"
 node scripts/intel.mjs || echo "intel refresh skipped (see log)"
 
+# 2b. Regenerate the Website Pilot tracker board from the reply log intel.mjs just
+#     refreshed (free-mockup outreach pipeline). Pure file I/O, no creds; skips
+#     cleanly if the pilot folder isn't present.
+PILOT_TRACKER="$HOME/Downloads/sue-build-v3/website-pitch-pilot/tracker/build-board.mjs"
+[ -f "$PILOT_TRACKER" ] && node "$PILOT_TRACKER" || echo "pilot tracker regen skipped"
+
 # 3. Draft routine email replies (Sue review gate) — stages for the dashboard.
 #    Reads the same 48h inbound mail, scope-gates to low-risk routine replies,
 #    drafts in Collin's voice (multiple labeled options for yes/no & either/or
