@@ -10,6 +10,10 @@ set -euo pipefail
 # cron runs with a bare PATH — add where node/npm/claude actually live.
 export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
+# Omaha Deal Engine lead alerts to Collin + Tyler are LIVE (approved 2026-06-22).
+# Set to 0 to pause the acreage/MF + hot-lead digest.
+export ALERTS_LIVE=1
+
 JARVIS_DIR="$HOME/Developer/jarvis-brain"   # moved off Desktop (macOS TCC blocked cron from Desktop). sync.mjs reads this via .env.local.
 CC_DIR="$HOME/Developer/jarvis-command-center"
 
