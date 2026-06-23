@@ -12,7 +12,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
-import { gather, bqReady } from "./pgo-bq.mjs";
+import { gather, gatherAnalysisData, bqReady } from "./pgo-bq.mjs";
+import { analyze } from "./pgo-analyze.mjs";
 
 function loadEnv() {
   const p = join(process.cwd(), ".env.local");
@@ -38,6 +39,16 @@ async function main() {
     `pgo-sync: period ${f.period} · ${f.property_count} properties · NOI ${Math.round(f.noi).toLocaleString()} · A/R ${Math.round(f.ar_total).toLocaleString()} · ${f.evictions_pending} evictions`
   );
 
+  // Deterministic intelligence (trends / focus / watch / due-outs) for the dashboard.
+  // AI narrative is report-only (avoid a Claude call on every daily sync).
+  let analysis = null;
+  try {
+    analysis = analyze(f, await gatherAnalysisData());
+    console.log(`pgo-sync: analysis — ${analysis.counts.focus} focus, ${analysis.counts.watch} watch, ${analysis.counts.dueOuts} due-outs.`);
+  } catch (e) {
+    console.error("pgo-sync: analysis failed (non-fatal):", e.message);
+  }
+
   // 1 — snapshot (append-only time series)
   const { error: snapErr } = await db.from("pgo_snapshot").insert({
     period: f.period,
@@ -54,7 +65,7 @@ async function main() {
     evictions_pending: f.evictions_pending,
     notices_given: f.notices_given,
     delinquency_date: f.delinquency_date,
-    raw: { trend: f.trend, properties: f.properties, recurring_charges_available: f.recurring_charges_available },
+    raw: { trend: f.trend, properties: f.properties, recurring_charges_available: f.recurring_charges_available, analysis },
   });
   if (snapErr) { console.error("pgo-sync: snapshot insert error", snapErr.message); process.exit(1); }
 

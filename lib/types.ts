@@ -407,10 +407,53 @@ export interface PgoPropertyDetail {
   units_delinquent: number;
 }
 
+export interface PgoTrends {
+  noi_latest: number;
+  noi_mom_pct: number | null;
+  noi_vs_avg3_pct: number | null;
+  noi_direction: "up" | "down" | "flat";
+  opex_ratio: number | null;
+  opex_ratio_3mo: number | null;
+  opex_ratio_trend: "rising" | "easing" | "flat";
+  ar_now: number;
+  ar_wow: number | null;
+  ar_pct_income: number | null;
+}
+
+export interface PgoScoredItem {
+  property_id: number;
+  name: string;
+  score: number;
+  noi: number;
+  margin: number | null;
+  ar_total: number;
+  streak: number;
+  reasons: string[];
+  momNoi: number | null;
+  newlyNegative?: boolean;
+}
+
+export interface PgoDueOut {
+  kind: "eviction" | "delinquency" | "noi" | "expense";
+  priority: number;
+  text: string;
+}
+
+export interface PgoAnalysis {
+  generated_for: string;
+  trends: PgoTrends;
+  focus: PgoScoredItem[];
+  watch: PgoScoredItem[];
+  wins: PgoScoredItem[];
+  dueOuts: PgoDueOut[];
+  counts: { focus: number; watch: number; dueOuts: number };
+}
+
 export interface PgoSnapshotRaw {
   trend: PgoTrendPoint[];
   properties: PgoPropertyDetail[];
   recurring_charges_available: boolean;
+  analysis?: PgoAnalysis | null;
 }
 
 export interface PgoSnapshot {

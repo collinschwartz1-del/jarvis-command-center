@@ -1,6 +1,7 @@
 import { getPgoSnapshot, getPgoProperties, getPgoReports } from "@/lib/queries";
 import { PageHeader, SectionLabel, Empty } from "@/components/ui";
 import { StatTiles } from "@/components/pgo/StatTiles";
+import { Intelligence } from "@/components/pgo/Intelligence";
 import { NoiTrend } from "@/components/pgo/NoiTrend";
 import { Aging } from "@/components/pgo/Aging";
 import { PropertyTable } from "@/components/pgo/PropertyTable";
@@ -33,6 +34,9 @@ export default async function PgoPage() {
         <>
           {/* 1 — portfolio stats */}
           <StatTiles snap={snap} />
+
+          {/* 1.5 — intelligence: focus / due-outs / trends / watch */}
+          <Intelligence analysis={snap.raw?.analysis} />
 
           {/* 2 — NOI trend + A/R aging */}
           <section className="grid gap-4 lg:grid-cols-2">

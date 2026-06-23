@@ -53,6 +53,55 @@ async function q(sql) {
 
 const num = (v) => (v == null ? 0 : Number(v));
 
+// Richer pulls for the intelligence layer (scripts/pgo-analyze.mjs):
+//   - per-property monthly NOI history (trend / declining detection)
+//   - per-property per-account operating expense by month (category spike detection)
+//   - delinquency at lease grain, current snapshot + ~7 days prior (escalation deltas)
+// Operating-only throughout (t12_section income/expense) — CapEx excluded by design.
+export async function gatherAnalysisData() {
+  const fin = view("financial_snapshots");
+  const del = view("delinquency_snapshots");
+
+  // 1 — NOI history per property, last 6 months
+  const noiHistory = await q(`
+    SELECT property_id, snapshot_month AS month,
+           ROUND(SUM(IF(t12_section='income',  total_amount, 0))) AS income,
+           ROUND(SUM(IF(t12_section='expense', total_amount, 0))) AS expense
+    FROM ${fin}
+    WHERE snapshot_month >= FORMAT_DATE('%Y-%m', DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH))
+    GROUP BY property_id, month
+    ORDER BY property_id, month
+  `);
+
+  // 2 — operating expense by property + account, last 4 months (spike detection)
+  const expenseRows = await q(`
+    SELECT property_id, ANY_VALUE(property_name) AS property_name,
+           account_name, snapshot_month AS month, ROUND(SUM(total_amount)) AS amt
+    FROM ${fin}
+    WHERE t12_section='expense'
+      AND snapshot_month >= FORMAT_DATE('%Y-%m', DATE_SUB(CURRENT_DATE(), INTERVAL 4 MONTH))
+    GROUP BY property_id, account_name, month
+  `);
+
+  // 3 — delinquency at lease grain: current snapshot + the snapshot ~7 days prior
+  const [dates] = await q(`
+    SELECT CAST(MAX(snapshot_date) AS STRING) AS cur,
+           CAST((SELECT MAX(snapshot_date) FROM ${del}
+                 WHERE snapshot_date <= DATE_SUB((SELECT MAX(snapshot_date) FROM ${del}), INTERVAL 7 DAY)) AS STRING) AS prior
+    FROM ${del}
+  `);
+  const leaseCols = `lease_id, property_id, total_balance,
+    balance_over_90_days AS over_90, is_notice_given, eviction_pending_date`;
+  const delinqNow = dates.cur ? await q(`
+    SELECT ${leaseCols} FROM ${del} WHERE snapshot_date = DATE('${dates.cur}')
+  `) : [];
+  const delinqPrior = dates.prior ? await q(`
+    SELECT ${leaseCols} FROM ${del} WHERE snapshot_date = DATE('${dates.prior}')
+  `) : [];
+
+  return { noiHistory, expenseRows, delinqNow, delinqPrior, curDate: dates.cur, priorDate: dates.prior };
+}
+
 // Total delinquent A/R as of the latest snapshot on or before (today - daysAgo).
 // Used by the weekly report for a week-over-week A/R delta. Returns null if no
 // snapshot exists that far back.
