@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { gather, gatherAnalysisData, bqReady } from "./pgo-bq.mjs";
 import { analyze } from "./pgo-analyze.mjs";
+import { classify, diffClassification, buildAgendas, ownerBrief } from "./asset-intel.mjs";
 
 function loadEnv() {
   const p = join(process.cwd(), ".env.local");
@@ -89,6 +90,29 @@ async function main() {
   }
 
   console.log(`pgo-sync: done — snapshot + ${rows.length} properties cached.`);
+
+  // ---- Asset Management OS: classification + agendas + owner brief (deterministic) ----
+  if (analysis) {
+    try {
+      const { data: prev } = await db
+        .from("am_snapshot").select("raw").order("captured_at", { ascending: false }).limit(1).maybeSingle();
+      const prevAll = prev?.raw?.classification?.all || null;
+      const cls = classify(f, analysis);
+      const changes = diffClassification(cls, prevAll);
+      const agendas = buildAgendas(cls, analysis, f, changes);
+      const brief = ownerBrief(cls, analysis, f, changes);
+      const { error: amErr } = await db.from("am_snapshot").insert({
+        period: f.period,
+        red_count: cls.counts.red, nonstab_count: cls.counts.nonStab,
+        stab_count: cls.counts.stab, total_count: cls.counts.total,
+        raw: { classification: cls, agendas, ownerBrief: brief, changes, ai: null },
+      });
+      if (amErr) console.error("pgo-sync: am_snapshot insert error", amErr.message);
+      else console.log(`pgo-sync: asset-mgmt — Red ${cls.counts.red} · Non-Stab ${cls.counts.nonStab} · Stab ${cls.counts.stab}${changes.length ? ` · ${changes.length} status change(s)` : ""}.`);
+    } catch (e) {
+      console.error("pgo-sync: asset-mgmt step failed (non-fatal):", e.message);
+    }
+  }
 }
 
 main().catch((e) => {

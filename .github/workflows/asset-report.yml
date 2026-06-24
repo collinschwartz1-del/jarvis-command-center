@@ -1,0 +1,48 @@
+name: LW Owner Brief
+
+# Weekly LeavenWealth Owner's Asset Brief: classifies the portfolio, builds
+# per-meeting agendas, writes Collin's owner brief + grounded AI summary, renders
+# a PDF, emails it to Collin, and updates the /asset-mgmt dashboard. The daily
+# classification itself runs in the PGO Sync workflow (writes am_snapshot); this
+# adds the weekly AI brief + email.
+#
+# Schedule is UTC (no DST). 13:00 UTC Mon = 8am CDT / 7am CST — start of week,
+# ahead of the asset-management meetings. Adjust once the LW calendar is connected.
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: asset-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Write BigQuery service-account key
+        run: printf '%s' "$PGO_BQ_SA_JSON" > "$RUNNER_TEMP/pgo-sa.json"
+        env:
+          PGO_BQ_SA_JSON: ${{ secrets.PGO_BQ_SA_JSON }}
+      - name: Run owner brief
+        run: node scripts/asset-intel-report.mjs
+        env:
+          PGO_BQ_KEY_PATH: ${{ runner.temp }}/pgo-sa.json
+          PGO_BQ_BILLING_PROJECT: ${{ secrets.PGO_BQ_BILLING_PROJECT }}
+          PGO_BQ_DATASET: ${{ secrets.PGO_BQ_DATASET }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          GDRIVE_AM_FOLDER_ID: ${{ secrets.GDRIVE_AM_FOLDER_ID }}
+          AM_REPORT_TO: ${{ secrets.PGO_REPORT_TO }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

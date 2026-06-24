@@ -15,6 +15,7 @@
     "lls-report": "node scripts/lls-monthly-report.mjs",
     "pgo-sync": "node scripts/pgo-sync.mjs",
     "pgo-report": "node scripts/pgo-weekly-report.mjs",
+    "am-report": "node scripts/asset-intel-report.mjs",
     "gmail-auth": "node scripts/gmail-auth.mjs",
     "import-folio": "node scripts/import-folio.mjs"
   },

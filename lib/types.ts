@@ -498,3 +498,79 @@ export interface PgoReport {
   title: string | null;
   generated_at: string;
 }
+
+// ---- Asset Management Operating System ----
+export type AmTier = "Red Zone" | "Non-Stabilized" | "Stabilized";
+
+export interface AmClassRow {
+  property_id: number;
+  name: string;
+  tier: AmTier;
+  score: number;
+  noi: number;
+  income: number;
+  margin: number | null;
+  ar_total: number;
+  ar_pct_income: number;
+  evictions: number;
+  streak: number;
+  reasons: string[];
+  source: string;
+}
+
+export interface AmClassification {
+  redZone: AmClassRow[];
+  nonStabilized: AmClassRow[];
+  stabilized: AmClassRow[];
+  counts: { red: number; nonStab: number; stab: number; total: number };
+  all: AmClassRow[];
+}
+
+export interface AmChange {
+  name: string;
+  from: AmTier;
+  to: AmTier;
+  dir: "escalated" | "improved";
+}
+
+export interface AmAgenda {
+  title: string;
+  sections: Record<string, string[]>;
+}
+export type AmAgendas = Record<string, AmAgenda>;
+
+export interface AmOwnerBrief {
+  period: string;
+  headlineStats: { noi: number; noi_mom_pct: number | null; ar_total: number; red: number; nonStab: number };
+  expensesToQuestion: string[];
+  collectionsToPress: string[];
+  propertiesToEscalate: string[];
+  statusChanges: string[];
+  trendsToWatch: string[];
+  orphans: string[];
+}
+
+export interface AmAiSummary {
+  headline: string;
+  bullets: string[];
+}
+
+export interface AmSnapshotRaw {
+  classification: AmClassification;
+  agendas: AmAgendas;
+  ownerBrief: AmOwnerBrief;
+  changes: AmChange[];
+  ai: AmAiSummary | null;
+}
+
+export interface AmSnapshot {
+  id: string;
+  captured_at: string;
+  period: string | null;
+  red_count: number | null;
+  nonstab_count: number | null;
+  stab_count: number | null;
+  total_count: number | null;
+  raw: AmSnapshotRaw;
+  created_at: string;
+}

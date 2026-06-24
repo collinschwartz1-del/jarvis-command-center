@@ -24,6 +24,7 @@ import type {
   PgoSnapshot,
   PgoProperty,
   PgoReport,
+  AmSnapshot,
 } from "./types";
 
 export async function getAgents(): Promise<Agent[]> {
@@ -305,4 +306,16 @@ export async function getPgoReports(limit = 12): Promise<PgoReport[]> {
     .order("period", { ascending: false })
     .limit(limit);
   return (data as PgoReport[]) ?? [];
+}
+
+// ---- Asset Management OS ----
+
+export async function getAmSnapshot(): Promise<AmSnapshot | null> {
+  const { data } = await supabaseAdmin()
+    .from("am_snapshot")
+    .select("*")
+    .order("captured_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as AmSnapshot) ?? null;
 }

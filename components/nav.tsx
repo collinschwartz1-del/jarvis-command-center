@@ -16,6 +16,7 @@ const LINKS = [
   { href: "/texts", label: "Texts" },
   { href: "/lending", label: "LLS" },
   { href: "/pgo", label: "PGO" },
+  { href: "/asset-mgmt", label: "Assets" },
   { href: "/bridge", label: "Bridge" },
   { href: "/trends", label: "Trends" },
   { href: "/ask", label: "Ask" },
