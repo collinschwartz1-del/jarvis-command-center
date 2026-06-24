@@ -1,5 +1,5 @@
 import { PageHeader, SectionLabel, Empty } from "@/components/ui";
-import { getDailyBrief, getCallQueue, getCallQueueCount, type BriefLead } from "@/lib/deal-queries";
+import { getDailyBrief, getCallQueue, getCallQueueCount, getDialStats, type BriefLead } from "@/lib/deal-queries";
 import { dealConfigured } from "@/lib/supabase-deal";
 import { CallQueue } from "@/components/sourcing/CallQueue";
 
@@ -38,7 +38,13 @@ function Td({ children, className = "" }: { children: React.ReactNode; className
 
 export default async function SourcingPage() {
   const configured = dealConfigured();
-  const [brief, calls, callableTotal] = await Promise.all([getDailyBrief(), getCallQueue(), getCallQueueCount()]);
+  const [brief, calls, callableTotal, dial] = await Promise.all([
+    getDailyBrief(),
+    getCallQueue(),
+    getCallQueueCount(),
+    getDialStats(),
+  ]);
+  const contactRate = dial.today.calls ? Math.round((dial.today.contacts / dial.today.calls) * 100) : 0;
 
   const off = brief
     .filter((l) => l.source === "off_market")
@@ -90,6 +96,39 @@ export default async function SourcingPage() {
           </div>
         ))}
       </div>
+
+      {/* dialing activity — the output side: is the queue actually being worked? */}
+      <section className="mb-7">
+        <SectionLabel>
+          Dialing activity · today (Central)
+          {dial.byCaller.length > 0 && (
+            <span className="font-normal text-muted">
+              {" · "}
+              {dial.byCaller.map((c) => `${c.actor} ${c.calls}`).join(" · ")}
+            </span>
+          )}
+        </SectionLabel>
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+          {[
+            { n: dial.today.calls, l: "calls today", c: "text-sky-400" },
+            { n: `${contactRate}%`, l: `contact rate · ${dial.today.contacts} reached`, c: dial.today.contacts ? "text-cyan-300" : "text-muted" },
+            { n: dial.today.interested, l: "hot / interested", c: dial.today.interested ? "text-emerald-400" : "text-muted" },
+            { n: dial.today.voicemail, l: "voicemails", c: "text-muted" },
+            { n: dial.today.callback, l: "callbacks", c: dial.today.callback ? "text-amber-400" : "text-muted" },
+            { n: dial.today.dnc, l: "DNC today", c: dial.today.dnc ? "text-rose-400" : "text-muted" },
+          ].map((s, i) => (
+            <div key={i} className="rounded-xl border border-border bg-panel p-4">
+              <div className={`text-2xl font-extrabold tracking-tight ${s.c}`}>{s.n}</div>
+              <div className="mt-0.5 text-xs text-muted">{s.l}</div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-muted">
+          Last 7 days: <span className="text-text">{dial.week.calls}</span> calls ·{" "}
+          <span className="text-text">{dial.week.contacts}</span> reached ·{" "}
+          <span className="text-emerald-400">{dial.week.interested}</span> hot
+        </p>
+      </section>
 
       {/* call queue — the action list */}
       <section className="mb-8">
