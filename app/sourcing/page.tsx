@@ -1,5 +1,13 @@
 import { PageHeader, SectionLabel, Empty } from "@/components/ui";
-import { getDailyBrief, getCallQueue, getCallQueueCount, getDialStats, type BriefLead } from "@/lib/deal-queries";
+import {
+  getDailyBrief,
+  getCallQueue,
+  getCallQueueCount,
+  getDialStats,
+  getLeadsBySource,
+  getLeadCountBySource,
+  type BriefLead,
+} from "@/lib/deal-queries";
 import { dealConfigured } from "@/lib/supabase-deal";
 import { CallQueue } from "@/components/sourcing/CallQueue";
 
@@ -38,11 +46,13 @@ function Td({ children, className = "" }: { children: React.ReactNode; className
 
 export default async function SourcingPage() {
   const configured = dealConfigured();
-  const [brief, calls, callableTotal, dial] = await Promise.all([
+  const [brief, calls, callableTotal, dial, mfLeads, mfCount] = await Promise.all([
     getDailyBrief(),
     getCallQueue(),
     getCallQueueCount(),
     getDialStats(),
+    getLeadsBySource("mf_pipeline"),
+    getLeadCountBySource("mf_pipeline"),
   ]);
   const contactRate = dial.today.calls ? Math.round((dial.today.contacts / dial.today.calls) * 100) : 0;
 
@@ -146,7 +156,7 @@ export default async function SourcingPage() {
 
       {/* off-market */}
       <section className="mb-8">
-        <SectionLabel>Off-market · Tier-A motivated sellers</SectionLabel>
+        <SectionLabel>Acreage (SFR) · off-market Tier-A motivated sellers</SectionLabel>
         {off.length === 0 ? (
           <Empty>No off-market leads in the queue.</Empty>
         ) : (
@@ -171,6 +181,46 @@ export default async function SourcingPage() {
                     <Td>{owner(l)}</Td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* multifamily track — off-market apartment targets (were hidden until now) */}
+      <section className="mb-8">
+        <SectionLabel>
+          Multifamily · off-market apartment targets
+          {mfCount > mfLeads.length ? ` · showing top ${mfLeads.length} of ${mfCount} by score` : ` · ${mfCount}`}
+        </SectionLabel>
+        {mfLeads.length === 0 ? (
+          <Empty>No multifamily leads in the spine.</Empty>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-border bg-panel">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr><Th>Address</Th><Th>Type</Th><Th>Building SF</Th><Th>Condition / yr</Th><Th>Owner</Th><Th>Priority</Th></tr>
+              </thead>
+              <tbody>
+                {mfLeads.map((l) => {
+                  const p = (l.payload ?? {}) as Record<string, unknown>;
+                  const sf = p.building_sf ? Number(p.building_sf).toLocaleString("en-US") : "—";
+                  const absentee = p.owner_absentee === true;
+                  const condYr = [p.condition, p.year_built].filter(Boolean).join(" · ") || "—";
+                  return (
+                    <tr key={l.lead_id} className="hover:bg-panel-2">
+                      <Td className="font-medium">{l.display_address}</Td>
+                      <Td className="text-muted">{String(p.building_desc ?? p.building_type ?? "—")}</Td>
+                      <Td>{sf}</Td>
+                      <Td className="text-muted">{condYr}</Td>
+                      <Td>
+                        {String(p.owner_name ?? l.owner_name ?? "—")}
+                        {absentee && <> <Pill tone="now">absentee</Pill></>}
+                      </Td>
+                      <Td className="font-semibold text-amber-400">{String(p.priority_score ?? l.score ?? "—")}</Td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

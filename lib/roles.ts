@@ -7,14 +7,19 @@
 //   caller — SCOPED to /sourcing only (the dialing VA). Can work the call queue
 //            and log dispositions, but cannot see/reach any other tab or data.
 //
-// Env (comma-separated emails):
+// Env (comma-separated emails) can ADD people, but the hard roster below is the
+// source of truth so access is correct regardless of what a given deploy has set:
 //   OWNER_EMAILS   — defaults to Collin's two addresses. Falls back to the
-//                    legacy ALLOWED_EMAILS so existing deploys keep working
-//                    (everyone previously allowed stays an owner).
-//   VIEWER_EMAILS  — defaults to Karen.
-//   CALLER_EMAILS  — the dialing VA(s). No default — empty until set.
+//                    legacy ALLOWED_EMAILS so existing deploys keep working.
+//   CALLER_EMAILS  — added to CALLER_ROSTER (Tyler + Karen — Deals-tab-only).
+//   VIEWER_EMAILS  — read-only-everywhere. No default; anyone who is an owner or
+//                    caller is stripped out so a caller can never leak past Deals.
 
 export type Role = "owner" | "viewer" | "caller";
+
+// Hard roster of Deals-only users (the dialing desk). Karen + Tyler are confined
+// to /sourcing — they cannot see Core, Inbox, LLS, PGO, or any other tab.
+const CALLER_ROSTER = ["tyler.trelles@bhhsamb.com", "karen@leavenwealth.com"];
 
 // Paths a `caller` may reach. Everything else redirects to /sourcing.
 const CALLER_PATHS = ["/sourcing", "/auth", "/login"];
@@ -34,12 +39,17 @@ export function ownerEmails(): string[] {
   );
 }
 
-export function viewerEmails(): string[] {
-  return parse(process.env.VIEWER_EMAILS ?? "karen@leavenwealth.com");
+// Deals-only callers: the hard roster plus any env additions.
+export function callerEmails(): string[] {
+  return [...new Set([...CALLER_ROSTER, ...parse(process.env.CALLER_EMAILS)])];
 }
 
-export function callerEmails(): string[] {
-  return parse(process.env.CALLER_EMAILS);
+// Read-only-everywhere viewers. No default, and never anyone who is an owner or a
+// caller — so a stale VIEWER_EMAILS can't accidentally let a caller out of Deals.
+export function viewerEmails(): string[] {
+  const owners = new Set(ownerEmails());
+  const callers = new Set(callerEmails());
+  return parse(process.env.VIEWER_EMAILS).filter((e) => !owners.has(e) && !callers.has(e));
 }
 
 // Anyone who can reach the command center at all (owners ∪ viewers ∪ callers).

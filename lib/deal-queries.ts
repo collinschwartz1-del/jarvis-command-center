@@ -72,6 +72,36 @@ export async function getCallQueue(limit = 400): Promise<CallRow[]> {
   return (data ?? []) as CallRow[];
 }
 
+// Leads for one deal-type track (source), highest score first. The daily brief
+// is PostgREST-capped at ~1k rows, so each track gets its own bounded query.
+export async function getLeadsBySource(source: string, limit = 300): Promise<BriefLead[]> {
+  if (!dealConfigured()) return [];
+  const { data, error } = await supabaseDeal()
+    .from("v_daily_brief")
+    .select("*")
+    .eq("source", source)
+    .order("score", { ascending: false, nullsFirst: false })
+    .limit(limit);
+  if (error) {
+    console.error("getLeadsBySource:", error.message);
+    return [];
+  }
+  return (data ?? []) as BriefLead[];
+}
+
+export async function getLeadCountBySource(source: string): Promise<number> {
+  if (!dealConfigured()) return 0;
+  const { count, error } = await supabaseDeal()
+    .from("v_daily_brief")
+    .select("*", { count: "exact", head: true })
+    .eq("source", source);
+  if (error) {
+    console.error("getLeadCountBySource:", error.message);
+    return 0;
+  }
+  return count ?? 0;
+}
+
 // ---- Dialing activity (the output side: is the queue being worked?) --------
 // Call dispositions land in hub_lead_event as event_type='outreach',
 // channel='call', detail.outcome = the disposition, actor = who dialed.
