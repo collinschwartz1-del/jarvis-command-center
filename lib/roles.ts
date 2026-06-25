@@ -17,15 +17,23 @@
 
 export type Role = "owner" | "viewer" | "caller";
 
+// Hard roster of full-access owners (Collin + co-owners). Always owners regardless
+// of deploy env, mirroring the viewer/caller rosters. Tyler is an Acreage Brothers
+// co-owner Collin promoted to full owner access 2026-06-25 (was viewer).
+const OWNER_ROSTER = [
+  "collinschwartz1@gmail.com",
+  "collin@leavenwealth.com",
+  "tyler.trelles@bhhsamb.com",
+];
+
 // Hard roster of Deals-only users (the dialing desk). Confined to /sourcing — they
 // cannot see Core, Inbox, LLS, PGO, or any other tab.
 const CALLER_ROSTER = ["karen@leavenwealth.com"];
 
-// Hard roster of read-only viewers (co-owners / EA): full dashboard, mutate nothing.
-// Tyler is an Acreage Brothers co-owner who needs to view the deals. Roster
-// membership wins over a stale CALLER_EMAILS env entry (see callerEmails()), so
-// promoting someone here is a code-only change — no deploy-env edit required.
-const VIEWER_ROSTER = ["tyler.trelles@bhhsamb.com"];
+// Hard roster of read-only viewers (EA / co-owners who should see-but-not-touch).
+// Empty for now — Tyler was promoted to OWNER_ROSTER above. Owner/caller rosters
+// win over a stale env entry, so promotion is a code-only change — no deploy-env edit.
+const VIEWER_ROSTER: string[] = [];
 
 // Paths a `caller` may reach. Everything else redirects to /sourcing.
 const CALLER_PATHS = ["/sourcing", "/auth", "/login"];
@@ -38,11 +46,14 @@ function parse(list: string | undefined): string[] {
 }
 
 export function ownerEmails(): string[] {
-  return parse(
-    process.env.OWNER_EMAILS ??
-      process.env.ALLOWED_EMAILS ??
-      "collinschwartz1@gmail.com,collin@leavenwealth.com"
-  );
+  // Hard roster is the source of truth; env additions (OWNER_EMAILS, legacy
+  // ALLOWED_EMAILS) are unioned in so existing deploys keep working.
+  return [
+    ...new Set([
+      ...OWNER_ROSTER,
+      ...parse(process.env.OWNER_EMAILS ?? process.env.ALLOWED_EMAILS),
+    ]),
+  ];
 }
 
 // Read-only-everywhere viewers: hard roster + env additions, minus owners (owner wins).
