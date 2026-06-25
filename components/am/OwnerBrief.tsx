@@ -19,8 +19,30 @@ export function OwnerBrief({ brief, ai }: { brief: AmOwnerBrief; ai: AmAiSummary
       </div>
     ) : null;
 
+  const q = brief.questions;
+  const qGroups: { title: string; items: string[]; tone?: string }[] = q
+    ? [
+        { title: "Open the meeting", items: q.portfolio },
+        { title: "Data integrity — resolve before next week", items: q.dataIntegrity, tone: "text-amber-300" },
+        { title: "Red Zone — ask on each", items: q.redZone, tone: "text-red-300" },
+        { title: "Collections to press", items: q.collections },
+        { title: "Expenses to verify", items: q.expenses, tone: "text-amber-300" },
+      ].filter((g) => g.items.length)
+    : [];
+
   return (
     <div className="space-y-5">
+      {qGroups.length > 0 && (
+        <div className="rounded-lg border border-border bg-surface/40 p-4">
+          <div className="text-sm font-semibold text-text">Questions to Ask in the Meeting</div>
+          <div className="mt-3 space-y-4">
+            {qGroups.map((g) => (
+              <Group key={g.title} title={g.title} items={g.items} tone={g.tone} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {ai && (
         <div className="rounded-lg border border-accent/30 bg-accent/[0.06] p-4">
           <div className="text-sm font-semibold text-text">{ai.headline}</div>

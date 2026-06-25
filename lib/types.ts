@@ -539,6 +539,14 @@ export interface AmAgenda {
 }
 export type AmAgendas = Record<string, AmAgenda>;
 
+export interface AmQuestions {
+  portfolio: string[];
+  dataIntegrity: string[];
+  redZone: string[];
+  collections: string[];
+  expenses: string[];
+}
+
 export interface AmOwnerBrief {
   period: string;
   headlineStats: { noi: number; noi_mom_pct: number | null; ar_total: number; red: number; nonStab: number };
@@ -548,6 +556,7 @@ export interface AmOwnerBrief {
   statusChanges: string[];
   trendsToWatch: string[];
   orphans: string[];
+  questions?: AmQuestions;
 }
 
 export interface AmAiSummary {

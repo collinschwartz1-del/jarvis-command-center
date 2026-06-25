@@ -160,6 +160,68 @@ export function buildAgendas(cls, analysis, gathered, changes = []) {
   };
 }
 
+// Specific, ready-to-ask owner questions derived from the week's data. Turns the
+// brief's flags into pointed questions Collin can read straight off in the meeting.
+// Deterministic (no AI) — every question is anchored to a number so the answer is
+// verifiable, not a vibe. Grouped by lever; rendered in the dashboard + weekly email.
+export function buildQuestions(cls, analysis, gathered, changes = []) {
+  const portfolio = [];
+  const dataIntegrity = [];
+  const redZone = [];
+  const collections = [];
+  const expenses = [];
+
+  // ---- portfolio openers ----
+  if (gathered.evictions_pending || gathered.ar_total) {
+    portfolio.push(`We have ${gathered.evictions_pending} evictions pending and ${usd(gathered.ar_total)} in delinquent A/R portfolio-wide — who owns the eviction pipeline week-to-week, and what's our average days-to-completion?`);
+  }
+  const escalated = changes.filter((c) => c.dir === "escalated");
+  if (escalated.length) {
+    portfolio.push(`${escalated.length} asset(s) moved the wrong way this week (${escalated.map((c) => `${c.name}: ${c.from} → ${c.to}`).join("; ")}) — what changed in the last 30 days, and did we see it coming?`);
+  }
+
+  // ---- per Red Zone asset: ask the sharpest question its data implies ----
+  for (const p of cls.redZone) {
+    const arPct = p.ar_pct_income || 0;
+    if (p.income === 0 || p.noi < 0) {
+      dataIntegrity.push(`${p.name}: shows ${usd(p.noi)} NOI on ${usd(p.income)} income — is this vacant/offline, between tenants, or is the rent roll not flowing into Buildium? Confirm it's an operating issue, not a data gap.`);
+      continue;
+    }
+    if (arPct > 100) {
+      dataIntegrity.push(`${p.name}: A/R is ${arPct.toFixed(0)}% of monthly income (${usd(p.ar_total)}) with ${p.evictions} eviction(s) filed — is this real delinquency or a billing/ledger error? If real, why no escalation?`);
+      continue;
+    }
+    if (p.streak >= 3) {
+      redZone.push(`${p.name}: NOI has fallen ${p.streak} straight months — is the driver occupancy, concessions, or expenses? What's the one move to stop the slide?`);
+    } else if (arPct >= 25) {
+      redZone.push(`${p.name}: A/R is ${arPct.toFixed(0)}% of monthly income (${usd(p.ar_total)}) — a few large balances or broad non-payment? Pull the top 5 balances.`);
+    } else if (p.evictions >= 5) {
+      redZone.push(`${p.name}: ${p.evictions} evictions pending — screening problem, submarket problem, or one bad leasing period? What's the plan and cost to clear the backlog?`);
+    } else if (/Aged evictions/i.test(p.reasons.join(" "))) {
+      redZone.push(`${p.name}: evictions are aging past 60 days — what's the bottleneck (legal, court calendar, or our paperwork), and when do they clear?`);
+    } else {
+      redZone.push(`${p.name}: in Red Zone (${p.reasons[0] || "flagged"}) — what specifically gets it to NOI > 0 and A/R < 15% of income, and by when?`);
+    }
+  }
+
+  // ---- non-stab assets one notch from Red Zone ----
+  for (const p of cls.nonStabilized.filter((p) => p.score >= 45)) {
+    redZone.push(`${p.name}: score ${p.score}, one notch from Red Zone — what's the 30-day plan to pull it back before it escalates?`);
+  }
+
+  // ---- collections (newly 90+ / growing balances) as questions ----
+  for (const d of (analysis?.dueOuts || []).filter((d) => d.kind === "delinquency")) {
+    collections.push(`${d.text.replace(/ — (escalate|follow up)\.$/, "")} — what's the action, and who owns it?`);
+  }
+
+  // ---- expense spikes as verification questions (top 6 by priority order) ----
+  for (const d of (analysis?.dueOuts || []).filter((d) => d.kind === "expense").slice(0, 6)) {
+    expenses.push(`${d.text.replace(/ — verify\.$/, "")} — one-time or recurring, and should it have been capitalized rather than expensed?`);
+  }
+
+  return { portfolio, dataIntegrity, redZone, collections, expenses };
+}
+
 // The Owner's Weekly Brief — Collin's direction layer (not the operator task list).
 export function ownerBrief(cls, analysis, gathered, changes = []) {
   const expenseFlags = (analysis?.dueOuts || []).filter((d) => d.kind === "expense").map((d) => d.text);
@@ -178,6 +240,7 @@ export function ownerBrief(cls, analysis, gathered, changes = []) {
     expensesToQuestion: expenseFlags,
     collectionsToPress: collections,
     propertiesToEscalate: escalations,
+    questions: buildQuestions(cls, analysis, gathered, changes),
     statusChanges: changes.map((c) => `${c.name}: ${c.from} → ${c.to} (${c.dir})`),
     trendsToWatch: [
       analysis?.trends?.opex_ratio_trend === "rising" ? `Operating expense ratio is rising (${(analysis.trends.opex_ratio * 100).toFixed(0)}%)` : null,
