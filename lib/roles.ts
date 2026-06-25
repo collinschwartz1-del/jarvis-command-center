@@ -17,9 +17,15 @@
 
 export type Role = "owner" | "viewer" | "caller";
 
-// Hard roster of Deals-only users (the dialing desk). Karen + Tyler are confined
-// to /sourcing — they cannot see Core, Inbox, LLS, PGO, or any other tab.
-const CALLER_ROSTER = ["tyler.trelles@bhhsamb.com", "karen@leavenwealth.com"];
+// Hard roster of Deals-only users (the dialing desk). Confined to /sourcing — they
+// cannot see Core, Inbox, LLS, PGO, or any other tab.
+const CALLER_ROSTER = ["karen@leavenwealth.com"];
+
+// Hard roster of read-only viewers (co-owners / EA): full dashboard, mutate nothing.
+// Tyler is an Acreage Brothers co-owner who needs to view the deals. Roster
+// membership wins over a stale CALLER_EMAILS env entry (see callerEmails()), so
+// promoting someone here is a code-only change — no deploy-env edit required.
+const VIEWER_ROSTER = ["tyler.trelles@bhhsamb.com"];
 
 // Paths a `caller` may reach. Everything else redirects to /sourcing.
 const CALLER_PATHS = ["/sourcing", "/auth", "/login"];
@@ -39,17 +45,24 @@ export function ownerEmails(): string[] {
   );
 }
 
-// Deals-only callers: the hard roster plus any env additions.
-export function callerEmails(): string[] {
-  return [...new Set([...CALLER_ROSTER, ...parse(process.env.CALLER_EMAILS)])];
-}
-
-// Read-only-everywhere viewers. No default, and never anyone who is an owner or a
-// caller — so a stale VIEWER_EMAILS can't accidentally let a caller out of Deals.
+// Read-only-everywhere viewers: hard roster + env additions, minus owners (owner wins).
 export function viewerEmails(): string[] {
   const owners = new Set(ownerEmails());
-  const callers = new Set(callerEmails());
-  return parse(process.env.VIEWER_EMAILS).filter((e) => !owners.has(e) && !callers.has(e));
+  return [...new Set([...VIEWER_ROSTER, ...parse(process.env.VIEWER_EMAILS)])].filter(
+    (e) => !owners.has(e)
+  );
+}
+
+// Deals-only callers: hard roster + env additions, minus owners and viewers. The
+// viewer/owner rosters WIN, so a stale CALLER_EMAILS entry (e.g. a former caller
+// since promoted to viewer, like Tyler) can't drag someone back into the Deals
+// confine — promotion is a code-only change, no deploy-env edit needed.
+export function callerEmails(): string[] {
+  const owners = new Set(ownerEmails());
+  const viewers = new Set([...VIEWER_ROSTER, ...parse(process.env.VIEWER_EMAILS)]);
+  return [...new Set([...CALLER_ROSTER, ...parse(process.env.CALLER_EMAILS)])].filter(
+    (e) => !owners.has(e) && !viewers.has(e)
+  );
 }
 
 // Anyone who can reach the command center at all (owners ∪ viewers ∪ callers).
