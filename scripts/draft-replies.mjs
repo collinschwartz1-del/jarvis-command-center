@@ -52,6 +52,25 @@ const claude = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
 const SINCE_HOURS = 48;
 
+// Dedup guard: threads that already have an OPEN (pending/held) draft awaiting
+// Collin. We skip re-staging these so a thread that stays unanswered across
+// several daily runs doesn't pile up duplicate rows (→ duplicate Gmail drafts).
+// Fails open: if the lookup errors, the set stays empty and behavior is unchanged.
+let OPEN_THREADS = new Set();
+async function loadOpenThreads() {
+  try {
+    const { data, error } = await db
+      .from("email_drafts")
+      .select("gmail_thread_id")
+      .in("status", ["pending", "held"]);
+    if (error) { console.error("draft-replies: open-thread lookup failed (continuing):", error.message); return; }
+    OPEN_THREADS = new Set((data || []).map((r) => r.gmail_thread_id));
+    console.log(`draft-replies: ${OPEN_THREADS.size} thread(s) already have an open draft — will skip those.`);
+  } catch (e) {
+    console.error("draft-replies: open-thread lookup threw (continuing):", e?.message || e);
+  }
+}
+
 // ---------- Gmail (REST + fetch; token carries readonly + compose) ----------
 async function gmailToken() {
   const id = process.env.GMAIL_CLIENT_ID;
@@ -222,8 +241,13 @@ async function callClaude(system, user) {
 }
 
 async function logRow(row) {
+  if (OPEN_THREADS.has(row.gmail_thread_id)) {
+    console.log("draft-replies: skip dup — open draft already exists for thread", row.gmail_thread_id);
+    return;
+  }
   const { error } = await db.from("email_drafts").insert(row);
   if (error) console.error("draft-replies: log error", row.gmail_thread_id, error.message);
+  else OPEN_THREADS.add(row.gmail_thread_id); // guard against same-run dups too
 }
 
 // ---------- main ----------
@@ -235,6 +259,7 @@ async function main() {
   }
   const threads = await fetchInboundThreads(token);
   if (!threads.length) { console.log("draft-replies: no inbound threads."); return; }
+  await loadOpenThreads();
 
   // Pass 1 — drafter (drafts a reply for EVERY reply-needed thread; flags sensitive)
   const d = parseJson(await callClaude(DRAFTER_SYS, drafterPrompt(threads)), "drafter");
