@@ -42,8 +42,10 @@ export type CallRow = {
   contact_id: number;
   phone: string;
   phone_label: string | null;
+  email: string | null;
   litigator: boolean;
   equity_capture: string | null;
+  est_market_value: string | null;
   timing: string | null;
 };
 
@@ -59,12 +61,32 @@ export async function getDailyBrief(): Promise<BriefLead[]> {
   return (data ?? []) as BriefLead[];
 }
 
-export async function getCallQueue(limit = 400): Promise<CallRow[]> {
+// Exact total of leads in the daily brief. getDailyBrief() itself is PostgREST-
+// capped at ~1000 rows, so counting its array length under-reported the queue as
+// a flat "1000". This head-count is exact regardless of the row cap.
+export async function getDailyBriefCount(): Promise<number> {
+  if (!dealConfigured()) return 0;
+  const { count, error } = await supabaseDeal()
+    .from("v_daily_brief")
+    .select("*", { count: "exact", head: true });
+  if (error) {
+    console.error("getDailyBriefCount:", error.message);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+// The call queue, split by owner kind so the two callers work separate lists:
+//   "individual" → SFR sellers (Karen)   ·   "entity" → LLC/MF owners (Collin)
+export type CallerKind = "individual" | "entity";
+
+export async function getCallQueue(kind: CallerKind = "individual", limit = 400): Promise<CallRow[]> {
   if (!dealConfigured()) return [];
-  const { data, error } = await supabaseDeal()
-    .from("v_call_queue")
-    .select("*")
-    .limit(limit);
+  let q = supabaseDeal().from("v_call_queue").select("*").order("score", { ascending: false, nullsFirst: false });
+  q = kind === "entity"
+    ? q.neq("entity_type", "individual")                                  // LLC/trust/corp owners
+    : q.or("entity_type.is.null,entity_type.eq.individual");              // individuals (+ untyped)
+  const { data, error } = await q.limit(limit);
   if (error) {
     console.error("getCallQueue:", error.message);
     return [];
@@ -186,12 +208,14 @@ export async function getDialStats(): Promise<DialStats> {
   return { today, week, byCaller };
 }
 
-// True total of callable rows (the queue view is capped for rendering).
-export async function getCallQueueCount(): Promise<number> {
+// True total of callable rows for one caller kind (the view is capped for rendering).
+export async function getCallQueueCount(kind: CallerKind = "individual"): Promise<number> {
   if (!dealConfigured()) return 0;
-  const { count, error } = await supabaseDeal()
-    .from("v_call_queue")
-    .select("*", { count: "exact", head: true });
+  let q = supabaseDeal().from("v_call_queue").select("*", { count: "exact", head: true });
+  q = kind === "entity"
+    ? q.neq("entity_type", "individual")
+    : q.or("entity_type.is.null,entity_type.eq.individual");
+  const { count, error } = await q;
   if (error) {
     console.error("getCallQueueCount:", error.message);
     return 0;

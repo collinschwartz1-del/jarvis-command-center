@@ -8,21 +8,35 @@
 //     keep a usable view offline.
 //   - never cache API/auth/login or non-GET/cross-origin requests.
 
-const VERSION = "jarvis-v1";
+const VERSION = "jarvis-v2";
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 
-self.addEventListener("install", (e) => {
+// The SW must NEVER run in local dev: Next dev chunks have STABLE names but
+// changing content, so cache-first serving (below) hands the browser stale JS
+// after a rebuild and breaks module loading (originalFactory.call). On localhost
+// this worker self-destructs — clears caches, unregisters, and reloads open tabs.
+const DEV =
+  self.location.hostname === "localhost" || self.location.hostname === "127.0.0.1";
+
+self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     (async () => {
+      // Always clear every cache in dev; in prod clear only stale-version caches.
       const keys = await caches.keys();
       await Promise.all(
-        keys.filter((k) => !k.startsWith(VERSION)).map((k) => caches.delete(k))
+        keys.filter((k) => DEV || !k.startsWith(VERSION)).map((k) => caches.delete(k))
       );
+      if (DEV) {
+        await self.registration.unregister();
+        const clients = await self.clients.matchAll({ type: "window" });
+        clients.forEach((c) => c.navigate(c.url)); // hard-reload the now-clean tab
+        return;
+      }
       await self.clients.claim();
     })()
   );
@@ -46,6 +60,7 @@ function isNeverCache(url) {
 }
 
 self.addEventListener("fetch", (event) => {
+  if (DEV) return; // dev: never intercept — let everything hit the dev server fresh
   const { request } = event;
   if (request.method !== "GET") return;
 

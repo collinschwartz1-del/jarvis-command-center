@@ -1,6 +1,7 @@
 import { PageHeader, SectionLabel, Empty } from "@/components/ui";
 import {
   getDailyBrief,
+  getDailyBriefCount,
   getCallQueue,
   getCallQueueCount,
   getDialStats,
@@ -46,14 +47,18 @@ function Td({ children, className = "" }: { children: React.ReactNode; className
 
 export default async function SourcingPage() {
   const configured = dealConfigured();
-  const [brief, calls, callableTotal, dial, mfLeads, mfCount] = await Promise.all([
+  const [brief, briefTotal, sfrCalls, sfrTotal, entityCalls, entityTotal, dial, mfLeads, mfCount] = await Promise.all([
     getDailyBrief(),
-    getCallQueue(),
-    getCallQueueCount(),
+    getDailyBriefCount(),
+    getCallQueue("individual"),
+    getCallQueueCount("individual"),
+    getCallQueue("entity"),
+    getCallQueueCount("entity"),
     getDialStats(),
     getLeadsBySource("mf_pipeline"),
     getLeadCountBySource("mf_pipeline"),
   ]);
+  const callableTotal = sfrTotal + entityTotal;
   const contactRate = dial.today.calls ? Math.round((dial.today.contacts / dial.today.calls) * 100) : 0;
 
   const off = brief
@@ -95,7 +100,7 @@ export default async function SourcingPage() {
       {/* stat tiles */}
       <div className="mb-7 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { n: brief.length, l: "leads in queue", c: "text-sky-400" },
+          { n: briefTotal.toLocaleString(), l: "leads in queue", c: "text-sky-400" },
           { n: usd(totalEquity), l: "off-market equity capture", c: "text-emerald-400" },
           { n: approachNow, l: 'flagged "approach now"', c: "text-amber-400" },
           { n: callableTotal, l: "callable now (DNC-clean)", c: callableTotal ? "text-emerald-400" : "text-muted" },
@@ -140,17 +145,29 @@ export default async function SourcingPage() {
         </p>
       </section>
 
-      {/* call queue — the action list */}
+      {/* call queue — SFR (Karen's list: individual owners) */}
       <section className="mb-8">
-        <SectionLabel>Call queue · DNC-clean phones ready to dial{callableTotal > calls.length ? ` · showing top ${calls.length} of ${callableTotal} (highest equity first)` : ""}</SectionLabel>
-        {calls.length === 0 ? (
-          <Empty>
-            No callable phones yet. Run the Batch 02 skip-trace in PropStream, then{" "}
-            <span className="font-mono text-text">node deal-engine/ingest-skiptrace.mjs results.csv</span> — DNC-clean
-            numbers surface here automatically.
-          </Empty>
+        <SectionLabel>
+          Call queue · Acreage SFR — individual owners (Karen)
+          {sfrTotal > sfrCalls.length ? ` · showing top ${sfrCalls.length} of ${sfrTotal} (highest score first)` : ` · ${sfrTotal}`}
+        </SectionLabel>
+        {sfrCalls.length === 0 ? (
+          <Empty>No callable SFR phones in the queue.</Empty>
         ) : (
-          <CallQueue rows={calls} />
+          <CallQueue rows={sfrCalls} />
+        )}
+      </section>
+
+      {/* call queue — Multifamily / entity (Collin's list: LLC / apartment owners) */}
+      <section className="mb-8">
+        <SectionLabel>
+          Call queue · Multifamily / entity owners (Collin)
+          {entityTotal > entityCalls.length ? ` · showing top ${entityCalls.length} of ${entityTotal}` : ` · ${entityTotal}`}
+        </SectionLabel>
+        {entityCalls.length === 0 ? (
+          <Empty>No callable entity/MF phones yet. Run <span className="font-mono text-text">node deal-engine/skiptrace-batchdata.mjs --entities</span> to trace LLC owners by mailing address.</Empty>
+        ) : (
+          <CallQueue rows={entityCalls} />
         )}
       </section>
 

@@ -17,7 +17,8 @@
     "pgo-report": "node scripts/pgo-weekly-report.mjs",
     "am-report": "node scripts/asset-intel-report.mjs",
     "gmail-auth": "node scripts/gmail-auth.mjs",
-    "import-folio": "node scripts/import-folio.mjs"
+    "import-folio": "node scripts/import-folio.mjs",
+    "contacts-import": "node --experimental-strip-types scripts/contacts-import.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",

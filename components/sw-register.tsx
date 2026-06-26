@@ -7,6 +7,9 @@ import { useEffect } from "react";
 // No-ops in browsers without SW support.
 export function ServiceWorkerRegister() {
   useEffect(() => {
+    // Never register the SW in dev — it cache-firsts stable-named dev chunks and
+    // breaks HMR. The PWA offline fallback only matters for the deployed app.
+    if (process.env.NODE_ENV !== "production") return;
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     const onLoad = () => {
       navigator.serviceWorker.register("/sw.js").catch(() => {
