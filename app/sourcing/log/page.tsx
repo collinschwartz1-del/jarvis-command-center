@@ -7,6 +7,7 @@ import {
   type LatestOutreach,
 } from "@/lib/deal-queries";
 import { dealConfigured } from "@/lib/supabase-deal";
+import { UndoButton } from "@/components/sourcing/UndoButton";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ function OutcomeBadge({ event }: { event: CallLogEvent }) {
   return <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${s.cls}`}>{s.label}</span>;
 }
 
-function Th({ children }: { children: React.ReactNode }) {
+function Th({ children }: { children?: React.ReactNode }) {
   return (
     <th className="border-b border-border px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted">
       {children}
@@ -135,19 +136,25 @@ export default async function CallLogPage() {
             <div className="overflow-x-auto rounded-xl border border-border bg-panel">
               <table className="w-full text-[13px]">
                 <thead>
-                  <tr><Th>When</Th><Th>Property</Th><Th>Owner</Th><Th>Action</Th><Th>Note</Th><Th>By</Th></tr>
+                  <tr><Th>When</Th><Th>Property</Th><Th>Owner</Th><Th>Action</Th><Th>Note</Th><Th>By</Th><Th></Th></tr>
                 </thead>
                 <tbody>
-                  {log.map((e) => (
-                    <tr key={e.id} className="hover:bg-panel-2">
+                  {log.map((e) => {
+                    const voided = !!e.voided_at;
+                    return (
+                    <tr key={e.id} className={`group hover:bg-panel-2 ${voided ? "text-zinc-600 [&_td]:line-through" : ""}`}>
                       <Td className="whitespace-nowrap font-mono text-[11px] text-muted">{when(e.created_at)}</Td>
                       <Td className="font-medium">{e.display_address}</Td>
                       <Td>{e.owner_name ?? "—"}</Td>
                       <Td><OutcomeBadge event={e} /></Td>
                       <Td className="max-w-[360px] text-muted">{e.note || <span className="text-zinc-600">—</span>}</Td>
                       <Td className="font-mono text-[11px] text-muted">{who(e.actor)}</Td>
+                      <Td className={`text-right no-underline ${voided ? "" : "opacity-0 transition group-hover:opacity-100"}`}>
+                        <UndoButton eventId={e.id} voided={voided} label={e.event_type === "note" ? "note" : (e.outcome ?? "entry").replace("_", " ")} />
+                      </Td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

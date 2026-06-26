@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { dispositionLead, addNote, getLeadHistory, type Disposition } from "@/app/sourcing/actions";
+import { useRouter } from "next/navigation";
+import { dispositionLead, addNote, getLeadHistory, undoLeadEvent, type Disposition } from "@/app/sourcing/actions";
 import type { CallLead } from "@/lib/deal-queries";
 
 const usd = (n: string | null) => {
@@ -18,7 +19,7 @@ const ACTIONS: { key: Disposition; label: string; cls: string; note?: boolean }[
   { key: "dnc", label: "DNC", cls: "bg-red-500/15 text-red-400 hover:bg-red-500/25" },
 ];
 
-type Ev = { id: number; event_type: string; channel: string | null; actor: string | null; detail: Record<string, unknown> | null; created_at: string };
+type Ev = { id: number; event_type: string; channel: string | null; actor: string | null; detail: Record<string, unknown> | null; created_at: string; voided_at: string | null };
 
 function fmtWhen(s: string) {
   try { return new Date(s).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
@@ -26,6 +27,7 @@ function fmtWhen(s: string) {
 }
 
 function Row({ c }: { c: CallLead }) {
+  const router = useRouter();
   const primary = c.phones[0];
   const [pending, start] = useTransition();
   const [done, setDone] = useState<string | null>(null);
@@ -34,6 +36,7 @@ function Row({ c }: { c: CallLead }) {
   const [events, setEvents] = useState<Ev[] | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, startNote] = useTransition();
+  const [undoing, startUndo] = useTransition();
 
   const loadHistory = () => {
     setOpen((v) => !v);
@@ -57,6 +60,22 @@ function Row({ c }: { c: CallLead }) {
       const res = await addNote(c.lead_id, noteDraft);
       if (res.ok) { setNoteDraft(""); getLeadHistory(c.lead_id).then((r) => setEvents((r.events as Ev[]) ?? [])); }
       else setErr(res.error ?? "note failed");
+    });
+  };
+
+  // Reverse a mis-clicked disposition or note: VOID the entry (kept in history,
+  // struck through), repair status (and un-DNC), then refresh the row + history.
+  const undo = (ev: Ev) => {
+    const label = (ev.detail?.outcome as string) || ev.event_type;
+    if (!window.confirm(`Void this "${label.replace("_", " ")}" entry? It stays in the history (struck through) but its effect is reversed.`)) return;
+    setErr(null);
+    startUndo(async () => {
+      const res = await undoLeadEvent(ev.id);
+      if (res.ok) {
+        setEvents((evs) => (evs ?? []).map((e) => (e.id === ev.id ? { ...e, voided_at: new Date().toISOString() } : e)));
+        setDone(null);
+        router.refresh();
+      } else setErr(res.error ?? "void failed");
     });
   };
 
@@ -131,12 +150,21 @@ function Row({ c }: { c: CallLead }) {
                 {events.map((ev) => {
                   const note = (ev.detail?.note as string) || (ev.detail?.notes as string) || "";
                   const outcome = (ev.detail?.outcome as string) || ev.event_type;
+                  const voided = !!ev.voided_at;
                   return (
-                    <li key={ev.id} className="text-[12px] text-muted">
+                    <li key={ev.id} className={`group flex items-baseline gap-1.5 text-[12px] ${voided ? "text-zinc-600 line-through" : "text-muted"}`}>
                       <span className="text-zinc-500">{fmtWhen(ev.created_at)}</span>
-                      {" · "}<span className="font-semibold text-zinc-300">{outcome.replace("_", " ")}</span>
+                      {" · "}<span className={`font-semibold ${voided ? "" : "text-zinc-300"}`}>{outcome.replace("_", " ")}</span>
                       {ev.actor && <span className="text-zinc-500"> · {ev.actor}</span>}
-                      {note && <span className="text-text"> — {note}</span>}
+                      {note && <span className={voided ? "" : "text-text"}> — {note}</span>}
+                      {voided ? (
+                        <span className="ml-1 rounded bg-zinc-700/40 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 no-underline">voided</span>
+                      ) : (
+                        <button onClick={() => undo(ev)} disabled={undoing} title="Void this entry (kept in history, effect reversed)"
+                          className="ml-1 rounded px-1.5 text-[11px] font-semibold text-zinc-600 opacity-0 transition hover:bg-red-500/15 hover:text-red-400 focus:opacity-100 group-hover:opacity-100 disabled:opacity-40">
+                          void
+                        </button>
+                      )}
                     </li>
                   );
                 })}

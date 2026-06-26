@@ -178,6 +178,7 @@ export async function getDialStats(): Promise<DialStats> {
     .select("detail, actor, created_at")
     .eq("event_type", "outreach")
     .eq("channel", "call")
+    .is("voided_at", null) // voided (undone) calls don't count toward activity
     .gte("created_at", since)
     .limit(20000);
   if (error) {
@@ -251,6 +252,8 @@ export type CallLogEvent = {
   score: number | null;
   status: string;
   created_at: string;
+  voided_at: string | null;
+  voided_by: string | null;
 };
 
 // The full activity feed, newest first.
