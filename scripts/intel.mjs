@@ -73,6 +73,60 @@ function loadPilotWatchlist() {
 const PILOT = loadPilotWatchlist();
 const onPilotWatchlist = (email) => !!email && PILOT.has(String(email).toLowerCase().trim());
 
+// ---------- Acreage Brothers recognition ----------
+// Collin's acreagebros.com mailboxes (collin@ / info@) auto-forward into this
+// Gmail, so Acreage mail already flows through the brief. This watchlist lets us
+// ATTRIBUTE it as Acreage and elevate settlement/closing statements — the sale
+// docs that update the flip tracker — instead of letting them sit as "fyi".
+// Detection looks across From/To/Cc (forwarded mail keeps acreagebros in To/Cc).
+function loadAcreageWatchlist() {
+  try {
+    const p = join(process.cwd(), "config", "acreage-watchlist.json");
+    if (!existsSync(p)) return { domains: new Set(), addresses: new Set(), titles: new Set(), hints: [] };
+    const raw = JSON.parse(readFileSync(p, "utf8"));
+    const norm = (a) => (a || []).map((s) => String(s).toLowerCase().trim()).filter(Boolean);
+    return {
+      domains: new Set(norm(raw.domains)),
+      addresses: new Set(norm(raw.addresses)),
+      titles: new Set(norm(raw.title_companies)),
+      hints: norm(raw.settlement_subject_hints),
+    };
+  } catch (e) {
+    console.error("intel: acreage watchlist load failed —", e.message);
+    return { domains: new Set(), addresses: new Set(), titles: new Set(), hints: [] };
+  }
+}
+const ACREAGE = loadAcreageWatchlist();
+
+// Does an email address belong to Acreage's world (own domain, known counterparty,
+// or a title company we close with)?
+function acreageActor(email) {
+  const e = String(email || "").toLowerCase().trim();
+  if (!e) return false;
+  const domain = e.includes("@") ? e.split("@")[1] : e;
+  return ACREAGE.addresses.has(e) || ACREAGE.domains.has(domain) || ACREAGE.titles.has(domain);
+}
+// Pull every address out of a raw "Name <a@b>, c@d" header string.
+function addrsFrom(headerVal) {
+  return String(headerVal || "")
+    .split(",")
+    .map((p) => (p.match(/<(.+?)>/)?.[1] || p).trim().toLowerCase())
+    .filter((x) => x.includes("@"));
+}
+// Flag a pulled message as Acreage-related, and whether it carries a settlement/
+// closing statement (the thing that should update the flip tracker).
+function tagAcreageMessage(m) {
+  const people = [m.from_email, ...addrsFrom(m.to), ...addrsFrom(m.cc), ...addrsFrom(m.delivered_to)];
+  const isAcreage = people.some(acreageActor);
+  const hay = `${m.subject || ""} ${m.from_name || ""}`.toLowerCase();
+  const looksSettlement = ACREAGE.hints.some((h) => hay.includes(h)) ||
+    (m.has_attachment && /\b(closing|settlement|alta|cd|payoff|hud)\b/.test(hay));
+  m.acreage = isAcreage;
+  // A settlement statement only counts as Acreage's if an Acreage actor is on it.
+  m.acreage_settlement = isAcreage && looksSettlement;
+  return m;
+}
+
 // Where the pilot tracker board lives (build-board.mjs reads replies.json from here).
 const PILOT_DIR =
   process.env.PILOT_TRACKER_DIR ||
@@ -124,6 +178,39 @@ function tagPilotReplies(briefs) {
     recordPilotReply(b);
   }
   if (hits) console.log(`intel: 📨 ${hits} website-pilot reply(ies) flagged.`);
+  return briefs;
+}
+
+// Deterministic safety net for Acreage settlement statements: even if the model
+// files one as "fyi", any brief whose sender sent an Acreage settlement/closing
+// statement gets pulled into the action lane with a FLIP-TRACKER item. Keyed by
+// sender email against the raw messages we pulled this window.
+function tagAcreageBriefs(briefs, msgs) {
+  const settlementSenders = new Map(); // email -> sample subject
+  for (const m of msgs || []) {
+    if (!m.acreage_settlement || m.from_me) continue;
+    const e = String(m.from_email || "").toLowerCase().trim();
+    if (e && !settlementSenders.has(e)) settlementSenders.set(e, m.subject || "");
+  }
+  let hits = 0;
+  for (const b of briefs || []) {
+    const e = String(b.person_email || "").toLowerCase().trim();
+    if (!settlementSenders.has(e)) continue;
+    hits++;
+    const tag = "🏚️ ACREAGE CLOSING";
+    if (!String(b.summary || "").startsWith(tag))
+      b.summary = `${tag} — ${b.summary || "settlement/closing statement received for an Acreage flip."}`;
+    if (b.category === "fyi" || b.category === "awaiting") b.category = "question";
+    b.action_items = Array.isArray(b.action_items) ? b.action_items : [];
+    const has = b.action_items.some((a) =>
+      /flip-tracker|settlement|closing statement/i.test(typeof a === "string" ? a : a?.text || "")
+    );
+    if (!has)
+      b.action_items.unshift(
+        "FLIP-TRACKER: settlement statement received — capture sale price, closing costs, net proceeds; file to vault + Drive."
+      );
+  }
+  if (hits) console.log(`intel: 🏚️ ${hits} Acreage closing-statement brief(s) elevated.`);
   return briefs;
 }
 
@@ -189,18 +276,23 @@ async function fetchGmail() {
     // classifier lets it tell "they're asking me" (question) from "I'm waiting
     // to hear back" (awaiting) instead of guessing from prose alone.
     const from_me = (m.labelIds || []).includes("SENT");
-    out.push({
+    out.push(tagAcreageMessage({
       mailbox: "gmail",
       from_name: name,
       from_email: email,
       from_me,
       subject: header(m.payload, "Subject"),
       date: header(m.payload, "Date"),
+      // To/Cc/Delivered-To let us spot forwarded acreagebros.com mail, where the
+      // acreage address sits in the recipients, not the From.
+      to: header(m.payload, "To"),
+      cc: header(m.payload, "Cc"),
+      delivered_to: header(m.payload, "Delivered-To"),
       snippet: m.snippet || "",
       body: decodeBody(m.payload),
       has_attachment: JSON.stringify(m.payload).includes('"filename":"') &&
         !/"filename":""/.test(JSON.stringify(m.payload)),
-    });
+    }));
   }
   console.log(`intel: pulled ${out.length} Gmail messages.`);
   return out;
@@ -271,7 +363,9 @@ TRIAGE — Jarvis exists so Collin acts faster, so every brief MUST carry a "cat
 - "fyi": informational only — nothing is owed by Collin.
 Default to "fyi" unless there is a clear action Collin owns. Only "sign" and "question" should carry action_items; for "awaiting" and "fyi" leave action_items empty unless a genuine task exists. Do not manufacture action items to look busy — an empty list is correct when nothing is owed.
 
-For any email about a real estate deal (multifamily, SFH/flip, land), add a deals[] entry. For any email about a wire, new/changed payment instructions, or bank-detail change, set wire_flag:true on that person and add an action_item starting with "WIRE-VERIFY:".${
+For any email about a real estate deal (multifamily, SFH/flip, land), add a deals[] entry. For any email about a wire, new/changed payment instructions, or bank-detail change, set wire_flag:true on that person and add an action_item starting with "WIRE-VERIFY:".
+
+ACREAGE BROTHERS — a message flagged acreage:true belongs to Collin's fix-and-flip business (acreagebros.com mailboxes forward here). Treat these as business-relevant, not personal noise. When acreage_settlement:true, the email is a closing/settlement statement for an Acreage flip: set category "sign" or "question" (never "fyi"), and add an action_item that starts with "FLIP-TRACKER:" naming the property and what to capture (sale price, closing costs, net proceeds). For these also add a deals[] entry with asset_type "flip", routed_to "flip-tracker", and put the property address in "address".${
   WEB
     ? " You have web search/fetch — use it sparingly to verify or enrich a specific factual claim (a firm, an address, a deal figure) when it materially changes the takeaway. Ground enrichments in what you find."
     : ""
@@ -282,6 +376,7 @@ function userPrompt(msgs) {
     i, mailbox: m.mailbox, from_name: m.from_name, from_email: m.from_email,
     subject: m.subject, date: m.date, from_me: !!m.from_me,
     has_attachment: m.has_attachment,
+    acreage: !!m.acreage, acreage_settlement: !!m.acreage_settlement,
     text: (m.body || m.snippet || "").slice(0, 1500),
   }));
   return `Emails (last ${SINCE_HOURS}h):\n${JSON.stringify(compact)}\n\n` +
@@ -464,7 +559,10 @@ async function main() {
     const { muted: isMuted, reason } = classifyNoise(m);
     // Never let a pilot prospect's inbound reply get filtered as noise.
     const pilotReply = onPilotWatchlist(m.from_email) && !m.from_me;
-    if (isMuted && !pilotReply) muted.push({ ...m, _mute_reason: reason });
+    // Never mute an inbound Acreage settlement/closing statement — it updates the
+    // flip tracker and must reach the brief even if it trips a noise pattern.
+    const acreageKeep = m.acreage_settlement && !m.from_me;
+    if (isMuted && !pilotReply && !acreageKeep) muted.push({ ...m, _mute_reason: reason });
     else msgs.push(m);
   }
   await recordMuted(muted);
@@ -475,6 +573,7 @@ async function main() {
 
   const { briefs, deals } = await analyze(msgs);
   tagPilotReplies(briefs);
+  tagAcreageBriefs(briefs, msgs);
   const nb = await upsertBriefs(briefs);
   const nd = await upsertDeals(deals);
   const wires = (briefs || []).filter((b) => b.wire_flag).map((b) => b.person_email);

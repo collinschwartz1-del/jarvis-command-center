@@ -1,0 +1,32 @@
+{
+  "_comment": "Acreage Brothers (fix-and-flip) recognition for the daily CEO brief. With Collin's acreagebros.com mailboxes auto-forwarding into collinschwartz1@gmail.com, this list lets intel.mjs ATTRIBUTE that mail as Acreage and elevate settlement/closing statements so they land as an action ('update flip tracker + file statement') instead of buried fyi. Add title companies / counterparties as new deals close.",
+  "domains": ["acreagebros.com"],
+  "addresses": [
+    "collin@acreagebros.com",
+    "info@acreagebros.com",
+    "tyler@acreagebros.com",
+    "leads@acreagebros.com",
+    "team.ethicore360@gmail.com"
+  ],
+  "title_companies": [
+    "investprotitle.com",
+    "greentitleomaha.com",
+    "greentitlelive.com",
+    "unitytitlegrp.com",
+    "drititle.com",
+    "cornhuskerlandtitle.com",
+    "spyglasstitle.com",
+    "pjmorgan.com",
+    "unitytitle.com"
+  ],
+  "settlement_subject_hints": [
+    "settlement statement",
+    "closing statement",
+    "closing disclosure",
+    "alta",
+    "closing complete",
+    "net proceeds",
+    "final policy",
+    "payoff"
+  ]
+}
