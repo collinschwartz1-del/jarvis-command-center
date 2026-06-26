@@ -76,6 +76,11 @@ node scripts/opportunity-report.mjs || echo "opportunity-report skipped (see log
 DEAL_DIR="$HOME/Downloads/sue-build-v3/deal-engine"
 if [ -d "$DEAL_DIR" ]; then
   node "$DEAL_DIR/bulk-ingest-from-oppengine.mjs"                       || echo "deal bulk-ingest skipped (see log)"
+  # e) Douglas County (DCHD) value + PIN backfill — authoritative county assessed
+  #    value (TOTAL_VALU) + parcel PIN into hub_property, county-wide. Free, no
+  #    scraping (dcgis.org ArcGIS). Idempotent: writes gaps only, keeps the Opp
+  #    Engine market AVM in est_market_value. ~4-5 min for the county pull.
+  node "$DEAL_DIR/dchd-value-backfill.mjs" --all                        || echo "dchd value backfill skipped (see log)"
   node "$DEAL_DIR/skiptrace-batchdata.mjs" --tier AB --limit "${SKIPTRACE_NIGHTLY:-250}" || echo "deal skip-trace skipped (see log)"
   node "$DEAL_DIR/text-intel-intake.mjs"                                || echo "text-intel intake skipped (see log)"
   node "$DEAL_DIR/generate-brief.mjs"                                   || echo "deal-brief generate skipped (see log)"
