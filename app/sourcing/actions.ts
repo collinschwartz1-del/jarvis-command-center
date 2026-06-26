@@ -44,11 +44,15 @@ async function requireDeskAccess(): Promise<{ ok: boolean; actor: string }> {
 
 export async function dispositionLead(input: {
   leadId: number;
-  contactId: number;
+  // The property's phone contacts. DNC flags all of them; other dispositions
+  // act on the lead and ignore this. (contactId kept for back-compat callers.)
+  contactIds?: number[];
+  contactId?: number;
   disposition: Disposition;
   notes?: string;
 }) {
-  const { leadId, contactId, disposition, notes } = input;
+  const { leadId, disposition, notes } = input;
+  const contactIds = input.contactIds ?? (input.contactId != null ? [input.contactId] : []);
   const { ok, actor } = await requireDeskAccess();
   if (!ok) return { ok: false, error: "Forbidden" };
 
@@ -63,12 +67,13 @@ export async function dispositionLead(input: {
   });
   if (logErr) return { ok: false, error: logErr.message };
 
-  // DNC removes the phone from the call queue (gate excludes dnc = true)
-  if (disposition === "dnc") {
+  // DNC = the owner said stop: flag every number on the property (gate excludes
+  // dnc = true) and the lead goes dead (STATUS_MAP), dropping it from the queue.
+  if (disposition === "dnc" && contactIds.length) {
     const { error: dncErr } = await sb
       .from("owner_contacts")
       .update({ dnc: true, dnc_checked_at: new Date().toISOString() })
-      .eq("id", contactId);
+      .in("id", contactIds);
     if (dncErr) return { ok: false, error: dncErr.message };
   }
 

@@ -11,6 +11,7 @@ import {
 } from "@/lib/deal-queries";
 import { dealConfigured } from "@/lib/supabase-deal";
 import { CallQueue } from "@/components/sourcing/CallQueue";
+import { currentRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,11 @@ function Td({ children, className = "" }: { children: React.ReactNode; className
 
 export default async function SourcingPage() {
   const configured = dealConfigured();
+  // A `caller` (Karen) works the Acreage SFR queue ONLY. Multifamily / entity
+  // owners are Collin's lane — visible to owners/viewers, hidden from callers so
+  // Karen never dials them.
+  const role = await currentRole();
+  const isCaller = role === "caller";
   const [brief, briefTotal, sfrCalls, sfrTotal, entityCalls, entityTotal, dial, mfLeads, mfCount] = await Promise.all([
     getDailyBrief(),
     getDailyBriefCount(),
@@ -114,15 +120,20 @@ export default async function SourcingPage() {
 
       {/* dialing activity — the output side: is the queue actually being worked? */}
       <section className="mb-7">
-        <SectionLabel>
-          Dialing activity · today (Central)
-          {dial.byCaller.length > 0 && (
-            <span className="font-normal text-muted">
-              {" · "}
-              {dial.byCaller.map((c) => `${c.actor} ${c.calls}`).join(" · ")}
-            </span>
-          )}
-        </SectionLabel>
+        <div className="flex items-baseline justify-between gap-3">
+          <SectionLabel>
+            Dialing activity · today (Central)
+            {dial.byCaller.length > 0 && (
+              <span className="font-normal text-muted">
+                {" · "}
+                {dial.byCaller.map((c) => `${c.actor} ${c.calls}`).join(" · ")}
+              </span>
+            )}
+          </SectionLabel>
+          <a href="/sourcing/log" className="whitespace-nowrap font-mono text-[12px] text-accent hover:underline">
+            Call Log · hot + callbacks + notes →
+          </a>
+        </div>
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
           {[
             { n: dial.today.calls, l: "calls today", c: "text-sky-400" },
@@ -158,18 +169,21 @@ export default async function SourcingPage() {
         )}
       </section>
 
-      {/* call queue — Multifamily / entity (Collin's list: LLC / apartment owners) */}
-      <section className="mb-8">
-        <SectionLabel>
-          Call queue · Multifamily / entity owners (Collin)
-          {entityTotal > entityCalls.length ? ` · showing top ${entityCalls.length} of ${entityTotal}` : ` · ${entityTotal}`}
-        </SectionLabel>
-        {entityCalls.length === 0 ? (
-          <Empty>No callable entity/MF phones yet. Run <span className="font-mono text-text">node deal-engine/skiptrace-batchdata.mjs --entities</span> to trace LLC owners by mailing address.</Empty>
-        ) : (
-          <CallQueue rows={entityCalls} />
-        )}
-      </section>
+      {/* call queue — Multifamily / entity (Collin's list: LLC / apartment owners).
+          Hidden from callers — Karen works SFR only. */}
+      {!isCaller && (
+        <section className="mb-8">
+          <SectionLabel>
+            Call queue · Multifamily / entity owners (Collin)
+            {entityTotal > entityCalls.length ? ` · showing top ${entityCalls.length} of ${entityTotal}` : ` · ${entityTotal}`}
+          </SectionLabel>
+          {entityCalls.length === 0 ? (
+            <Empty>No callable entity/MF phones yet. Run <span className="font-mono text-text">node deal-engine/skiptrace-batchdata.mjs --entities</span> to trace LLC owners by mailing address.</Empty>
+          ) : (
+            <CallQueue rows={entityCalls} />
+          )}
+        </section>
+      )}
 
       {/* off-market */}
       <section className="mb-8">
@@ -204,7 +218,8 @@ export default async function SourcingPage() {
         )}
       </section>
 
-      {/* multifamily track — off-market apartment targets (were hidden until now) */}
+      {/* multifamily track — off-market apartment targets. Owner/viewer only. */}
+      {!isCaller && (
       <section className="mb-8">
         <SectionLabel>
           Multifamily · off-market apartment targets
@@ -243,6 +258,7 @@ export default async function SourcingPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* wholesaler */}
       {whole.length > 0 && (

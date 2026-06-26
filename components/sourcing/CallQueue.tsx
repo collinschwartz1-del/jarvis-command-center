@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { dispositionLead, addNote, getLeadHistory, type Disposition } from "@/app/sourcing/actions";
-import type { CallRow } from "@/lib/deal-queries";
+import type { CallLead } from "@/lib/deal-queries";
 
 const usd = (n: string | null) => {
   const v = n == null ? NaN : parseFloat(n);
@@ -25,7 +25,8 @@ function fmtWhen(s: string) {
   catch { return s; }
 }
 
-function Row({ c }: { c: CallRow }) {
+function Row({ c }: { c: CallLead }) {
+  const primary = c.phones[0];
   const [pending, start] = useTransition();
   const [done, setDone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -41,10 +42,10 @@ function Row({ c }: { c: CallRow }) {
 
   const fire = (d: Disposition, wantNote: boolean) => {
     const notes = wantNote ? window.prompt(`Note for ${c.owner_name} (${d.replace("_", " ")}):`) ?? undefined : undefined;
-    if (d === "dnc" && !window.confirm(`Mark ${c.phone} as DNC? It drops off the call queue.`)) return;
+    if (d === "dnc" && !window.confirm(`Mark ${c.owner_name} as DNC? All ${c.phones.length} number${c.phones.length === 1 ? "" : "s"} drop off the call queue.`)) return;
     setErr(null);
     start(async () => {
-      const res = await dispositionLead({ leadId: c.lead_id, contactId: c.contact_id, disposition: d, notes });
+      const res = await dispositionLead({ leadId: c.lead_id, contactIds: c.phones.map((p) => p.contact_id), disposition: d, notes });
       if (res.ok) { setDone(d); if (open) getLeadHistory(c.lead_id).then((r) => setEvents((r.events as Ev[]) ?? [])); }
       else setErr(res.error ?? "failed");
     });
@@ -68,9 +69,34 @@ function Row({ c }: { c: CallRow }) {
         </td>
         <td className={`${td} font-medium`}>{c.display_address}</td>
         <td className={td}>{c.owner_name}{c.litigator && <span className="ml-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-400">litigator</span>}</td>
-        <td className={td}><a href={`tel:${c.phone.replace(/[^\d+]/g, "")}`} className="font-mono text-accent hover:underline">{c.phone}</a>{c.phone_label && <span className="text-muted"> · {c.phone_label}</span>}</td>
+        <td className={td}>
+          {/* Every number on the property, best (mobile) first — work down the
+              list if one doesn't answer. Primary is highlighted. */}
+          <div className="space-y-0.5">
+            {c.phones.length === 0 && <span className="text-muted">—</span>}
+            {c.phones.map((p, i) => (
+              <div key={p.contact_id} className="flex items-baseline gap-1.5">
+                <a
+                  href={`tel:${p.phone.replace(/[^\d+]/g, "")}`}
+                  className={`font-mono hover:underline ${i === 0 ? "text-accent" : "text-zinc-400"}`}
+                >
+                  {p.phone}
+                </a>
+                {p.phone_label && <span className="text-[11px] text-muted">{p.phone_label}</span>}
+              </div>
+            ))}
+            {(primary?.email ?? c.phones.find((p) => p.email)?.email) && (
+              <div className="text-[11px] text-muted">
+                <a href={`mailto:${primary?.email ?? c.phones.find((p) => p.email)?.email}`} className="hover:underline">
+                  {primary?.email ?? c.phones.find((p) => p.email)?.email}
+                </a>
+              </div>
+            )}
+          </div>
+        </td>
         <td className={td}>{c.score ?? "—"}</td>
         <td className={`${td} font-semibold text-emerald-400`}>{usd(c.equity_capture)}</td>
+        <td className={`${td} text-muted`}>{usd(c.est_market_value)}</td>
         <td className={td}>
           <div className="flex flex-wrap gap-1">
             {ACTIONS.map((a) => (
@@ -87,7 +113,7 @@ function Row({ c }: { c: CallRow }) {
       {open && (
         <tr className="bg-panel/40">
           <td></td>
-          <td colSpan={6} className="border-b border-border/60 px-2.5 py-3">
+          <td colSpan={7} className="border-b border-border/60 px-2.5 py-3">
             <div className="mb-2 flex gap-2">
               <input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && saveNote()}
@@ -123,19 +149,20 @@ function Row({ c }: { c: CallRow }) {
   );
 }
 
-export function CallQueue({ rows }: { rows: CallRow[] }) {
+export function CallQueue({ rows }: { rows: CallLead[] }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-panel">
       <table className="w-full text-[13px]">
         <thead>
           <tr>
-            {["", "Address", "Owner", "Phone", "Score", "Equity", "Disposition"].map((h, i) => (
+            {["", "Address", "Owner", "Phone", "Score", "Equity", "Est value", "Disposition"].map((h, i) => (
               <th key={i} className="border-b border-border px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((c) => (<Row key={c.contact_id} c={c} />))}
+          {/* One row per property — lead_id is unique now (phones are nested). */}
+          {rows.map((c) => (<Row key={c.lead_id} c={c} />))}
         </tbody>
       </table>
     </div>

@@ -28,8 +28,18 @@ export type BriefLead = {
   surfaced_at: string | null;
 };
 
-// Rows from the spine's v_call_queue view (DNC-clean callable phones).
-export type CallRow = {
+// One callable phone number on a property (DNC-clean). Each carries its own
+// contact_id so a single bad number can be DNC'd without killing the property.
+export type PhoneContact = {
+  contact_id: number;
+  phone: string;
+  phone_label: string | null;
+  email: string | null;
+};
+
+// One row per PROPERTY (lead), with its phone numbers rolled up (mobile first).
+// Backed by v_call_queue_properties, which groups the phone-level v_call_queue.
+export type CallLead = {
   lead_id: number;
   display_address: string;
   source: string;
@@ -39,14 +49,11 @@ export type CallRow = {
   owner_id: number;
   owner_name: string;
   entity_type: string | null;
-  contact_id: number;
-  phone: string;
-  phone_label: string | null;
-  email: string | null;
   litigator: boolean;
   equity_capture: string | null;
   est_market_value: string | null;
   timing: string | null;
+  phones: PhoneContact[];
 };
 
 export async function getDailyBrief(): Promise<BriefLead[]> {
@@ -80,9 +87,10 @@ export async function getDailyBriefCount(): Promise<number> {
 //   "individual" → SFR sellers (Karen)   ·   "entity" → LLC/MF owners (Collin)
 export type CallerKind = "individual" | "entity";
 
-export async function getCallQueue(kind: CallerKind = "individual", limit = 400): Promise<CallRow[]> {
+export async function getCallQueue(kind: CallerKind = "individual", limit = 400): Promise<CallLead[]> {
   if (!dealConfigured()) return [];
-  let q = supabaseDeal().from("v_call_queue").select("*").order("score", { ascending: false, nullsFirst: false });
+  // One row per property; phones already rolled up + sorted mobile-first in the view.
+  let q = supabaseDeal().from("v_call_queue_properties").select("*").order("score_num", { ascending: false, nullsFirst: false });
   q = kind === "entity"
     ? q.neq("entity_type", "individual")                                  // LLC/trust/corp owners
     : q.or("entity_type.is.null,entity_type.eq.individual");              // individuals (+ untyped)
@@ -91,7 +99,10 @@ export async function getCallQueue(kind: CallerKind = "individual", limit = 400)
     console.error("getCallQueue:", error.message);
     return [];
   }
-  return (data ?? []) as CallRow[];
+  return (data ?? []).map((r) => ({
+    ...(r as CallLead),
+    phones: Array.isArray(r.phones) ? (r.phones as PhoneContact[]) : [],
+  }));
 }
 
 // Leads for one deal-type track (source), highest score first. The daily brief
@@ -211,7 +222,8 @@ export async function getDialStats(): Promise<DialStats> {
 // True total of callable rows for one caller kind (the view is capped for rendering).
 export async function getCallQueueCount(kind: CallerKind = "individual"): Promise<number> {
   if (!dealConfigured()) return 0;
-  let q = supabaseDeal().from("v_call_queue").select("*", { count: "exact", head: true });
+  // Count properties (not phone numbers) so the header matches what's rendered.
+  let q = supabaseDeal().from("v_call_queue_properties").select("*", { count: "exact", head: true });
   q = kind === "entity"
     ? q.neq("entity_type", "individual")
     : q.or("entity_type.is.null,entity_type.eq.individual");
@@ -221,4 +233,65 @@ export async function getCallQueueCount(kind: CallerKind = "individual"): Promis
     return 0;
   }
   return count ?? 0;
+}
+
+// ---- Call Log: rolled-up activity (dispositions + notes) for Collin + Tyler --
+
+// One logged event: a call disposition or a free-text note, with the property
+// + owner resolved. Backed by v_call_log.
+export type CallLogEvent = {
+  id: number;
+  lead_id: number;
+  event_type: string; // 'outreach' (a call) | 'note'
+  outcome: string | null; // disposition when event_type='outreach'
+  note: string | null;
+  actor: string;
+  display_address: string;
+  owner_name: string | null;
+  score: number | null;
+  status: string;
+  created_at: string;
+};
+
+// The full activity feed, newest first.
+export async function getCallLog(limit = 200): Promise<CallLogEvent[]> {
+  if (!dealConfigured()) return [];
+  const { data, error } = await supabaseDeal()
+    .from("v_call_log")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("getCallLog:", error.message);
+    return [];
+  }
+  return (data ?? []) as CallLogEvent[];
+}
+
+// A lead at its CURRENT disposition (latest outcome wins). Backed by
+// v_lead_latest_outreach — powers the Hot list and Callbacks-due list.
+export type LatestOutreach = {
+  lead_id: number;
+  actor: string;
+  outcome: string | null;
+  note: string | null;
+  created_at: string;
+  display_address: string;
+  owner_name: string | null;
+  score: number | null;
+};
+
+export async function getLeadsByLatestOutcome(outcome: string, limit = 100): Promise<LatestOutreach[]> {
+  if (!dealConfigured()) return [];
+  const { data, error } = await supabaseDeal()
+    .from("v_lead_latest_outreach")
+    .select("*")
+    .eq("outcome", outcome)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("getLeadsByLatestOutcome:", error.message);
+    return [];
+  }
+  return (data ?? []) as LatestOutreach[];
 }
