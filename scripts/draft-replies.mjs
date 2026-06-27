@@ -1,32 +1,52 @@
 // Jarvis — email reply pipeline (draft → Sue review → Collin approves in /replies).
 //
-// Reads the last 48h of Gmail (same credentialed pull as intel.mjs), then for
-// each inbound thread that needs a reply:
-//   1. GATE      — drafter classifies routine | excluded | no-reply-needed.
-//                  "narrow first": only low-risk routine replies are drafted.
-//                  Hard-excluded: investor/LP, borrower/loan-status (Lendr/LLS),
-//                  pricing/offers, partner-sensitive (Tyler/Vince), money/wires,
-//                  anything needing a signature, sensitive named-person threads.
-//   2. DRAFT     — writes the reply in Collin's voice (short paras, no bullets,
-//                  one bold line max, "— Collin"). For DECISION threads (yes/no,
-//                  this-or-that), it writes 2-3 LABELED variants — one per path —
-//                  so Collin just picks the answer. Simple threads get one.
-//   3. SUE REVIEW— a separate pass carrying Collin's Approval Rules + voice lens,
-//                  judging EACH variant: approve | hold (+reason). Sue owns this.
-//   4. STAGE     — rows with >=1 Sue-approved variant are saved status 'pending'
-//                  for the Jarvis /replies tab. Collin picks a variant there and
-//                  the dashboard stages the Gmail draft. This script never writes
-//                  to Gmail and nothing auto-sends.
+// THE SINGLE inbound-reply drafter. (Karen's cloud routine no longer drafts
+// individual replies — it does triage digests + proactive nudges only — so there
+// is exactly one system staging reply drafts and one place that learns.)
 //
-// Every candidate is logged to email_drafts (variants + verdicts + status) as an
-// audit trail. Status: pending | held | excluded.
+// Flow per run (reads the last 48h of Gmail inbox, latest inbound msg per thread):
+//   0. FILTER     — drop no-reply/transactional/auto-reply/e-sign/calendar-bot
+//                   senders deterministically (lib/draft-control). The model never
+//                   sees a robot. (kills "drafted a reply to DocuSign/GitHub".)
+//   0b. DEDUP     — skip a thread if we've already drafted for its latest inbound
+//                   message OR it has an open draft. Only a NEW inbound message
+//                   re-opens a thread. (kills "answered thread comes back tomorrow".)
+//   0c. HARD NET  — refuse money/wire/signature threads deterministically; logged
+//                   as 'excluded', never drafted. (safety floor under the model.)
+//   1. DRAFT      — narrow-safe scope: draft LOW-RISK ROUTINE replies in Collin's
+//                   voice. Investor/LP, loan/borrower status, pricing/terms,
+//                   partner-sensitive, legal, or anything that commits a number →
+//                   category "needs-collin": NOT drafted, surfaced for him.
+//                   Decision threads get 2-3 labeled variants.
+//   2. SUE REVIEW — judges each variant: approve | hold (+reason). Sue owns this.
+//   3. STAGE      — rows with >=1 approved variant → status 'pending' for /replies.
+//                   Collin picks a variant; the dashboard stages the Gmail draft.
+//                   This script NEVER writes to Gmail and nothing auto-sends.
 //
-// Run:  node scripts/draft-replies.mjs   (stages pending replies for the dashboard)
+// SELF-LEARNING: each run loads Collin's recent verdicts (dismiss/edit/approve
+// from draft_feedback) and feeds them to the drafter + Sue as "here's what he
+// rejected / how he rewrites" — so the pipeline adapts to him over time.
+//
+// Every processed message gets exactly ONE ledger row in email_drafts (status:
+// pending | held | excluded | no_reply | needs_collin) — full audit trail and the
+// dedup key in one place.
+//
+// Run:  node scripts/draft-replies.mjs           (stages pending replies)
+//       node scripts/draft-replies.mjs --dry      (classify + print, write nothing)
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
+import {
+  isReplyableSender,
+  isHardExcluded,
+  loadDedupState,
+  dedupSkip,
+  loadFeedbackMemory,
+} from "../lib/draft-control.mjs";
+
+const DRY = process.argv.includes("--dry");
 
 // --- env (same loader as intel.mjs / sync.mjs) ---
 function loadEnv() {
@@ -51,25 +71,6 @@ const db = createClient(SUPA_URL, SUPA_KEY, { auth: { persistSession: false } })
 const claude = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
 const SINCE_HOURS = 48;
-
-// Dedup guard: threads that already have an OPEN (pending/held) draft awaiting
-// Collin. We skip re-staging these so a thread that stays unanswered across
-// several daily runs doesn't pile up duplicate rows (→ duplicate Gmail drafts).
-// Fails open: if the lookup errors, the set stays empty and behavior is unchanged.
-let OPEN_THREADS = new Set();
-async function loadOpenThreads() {
-  try {
-    const { data, error } = await db
-      .from("email_drafts")
-      .select("gmail_thread_id")
-      .in("status", ["pending", "held"]);
-    if (error) { console.error("draft-replies: open-thread lookup failed (continuing):", error.message); return; }
-    OPEN_THREADS = new Set((data || []).map((r) => r.gmail_thread_id));
-    console.log(`draft-replies: ${OPEN_THREADS.size} thread(s) already have an open draft — will skip those.`);
-  } catch (e) {
-    console.error("draft-replies: open-thread lookup threw (continuing):", e?.message || e);
-  }
-}
 
 // ---------- Gmail (REST + fetch; token carries readonly + compose) ----------
 async function gmailToken() {
@@ -151,31 +152,32 @@ async function fetchInboundThreads(token) {
   return threads;
 }
 
-// ---------- Pass 1: drafter (scope gate + reply in Collin's voice) ----------
-const DRAFTER_SYS = `You are Collin Schwartz's email assistant. You draft replies in HIS voice and you classify what is safe to draft.
+// ---------- Pass 1: drafter (NARROW-SAFE scope + reply in Collin's voice) ----------
+const DRAFTER_SYS = `You are Collin Schwartz's email assistant. You draft replies in HIS voice, and you are CONSERVATIVE about what you draft. The robot/no-reply senders are already filtered out — every thread you see is from a human.
 
-VOICE (this is email, mid-formality): Direct, anti-corporate, no fluff. Short paragraphs (1-3 sentences). NO bullet points — use paragraph breaks. Bold at most ONE key line. Sign off "— Collin". Contractions are fine. No corporate buzzwords (no "synergy", "optimize", "leverage" as a verb, "circle back", "touch base"), no marketing/urgency language, no "I hope this helps", no exclamation points (one max, ever). Operator-to-operator, never salesman. State things as fact, not "I think". If you don't have a fact, do NOT invent it — leave a clearly-marked placeholder like [confirm date] instead.
+VOICE (email, mid-formality): Direct, anti-corporate, no fluff. Short paragraphs (1-3 sentences). NO bullet points. Bold at most ONE key line. Sign off "— Collin". Contractions fine. No corporate buzzwords ("synergy", "leverage" as a verb, "circle back", "touch base"), no marketing/urgency language, no "I hope this helps", at most one exclamation point ever. Operator-to-operator, never salesman. State things as fact, not "I think". NEVER invent a fact, date, or figure — leave a clear placeholder like [confirm date].
 
-SCOPE — draft a reply for EVERY thread that needs one. Collin wants a prepopulated reply ready for every email, not just easy ones. The only threads you skip are ones that genuinely need NO reply (newsletter, receipt, FYI, auto-notification, thank-you with nothing owed) → category:"no-reply-needed". Everything else → category:"reply".
+SCOPE — narrow first. Classify each thread:
+- "reply"        → a LOW-RISK, ROUTINE message you can safely answer in Collin's voice: scheduling, intros, logistics, quick acknowledgments, "got it / here it is / let's talk", simple yes/no on non-committal matters. Draft it.
+- "needs-collin" → a thread where a wrong word costs money or trust, or that requires Collin's judgment/authority. DO NOT draft. Set this for ANY of:
+    • Investor / LP communications or capital (LeavenWealth, Liquid Lending fund investors)
+    • Borrower-facing or loan-status content (Lendr / LLS)
+    • Pricing, offers, terms, deal splits, or anything that commits a number/price/legal term
+    • Money movement, wires, payment instructions, bank details (these are also caught upstream, but flag them)
+    • Partner-sensitive matters (Tyler/Acreage, Vince/Titan, Chris/Mitch at LeavenWealth)
+    • Anything needing a signature, or a legal/contract commitment
+    • High-stakes named-person threads where nuance matters
+- "no-reply-needed" → genuinely needs no reply (a thank-you with nothing owed, an FYI, a confirmation). Skip.
 
-REPLY SHAPE — decide reply_kind for each "reply" thread:
-- "single": there is one natural reply. Produce ONE variant labeled "Reply".
-- "decision": the sender is asking a yes/no, an either/or, or to pick between options, and Collin could reasonably go more than one way. Produce 2-3 variants, ONE per path, each a COMPLETE standalone reply. Label each by the path it takes, e.g. "Yes — confirm", "No — decline", "Propose Thursday instead", "Option A", "Option B". Do NOT make the variants trivial rewordings of each other — they must represent genuinely different answers. Never invent which way Collin leans; just have each answer ready.
+When unsure between "reply" and "needs-collin", choose "needs-collin". Drafting fewer, safer replies is the goal — Collin would rather write the hard ones himself than fix a wrong auto-draft.
 
-SENSITIVITY — set "sensitivity":"sensitive" (else "normal") and a short "sensitive_reason" when the thread touches any of:
-- Investor/LP communications or capital (LeavenWealth, Liquid Lending fund investors)
-- Borrower-facing or loan-status content (Lendr / LLS loans)
-- Pricing, offers, or terms (Titan $9,997, lending terms, deal splits)
-- Partner-sensitive matters (Tyler/Acreage, Vince/Titan)
-- Money movement, wires, payment instructions, or bank-detail changes (sensitive_reason MUST start with "WIRE/MONEY:")
-- Anything needing a signature, or that would commit Collin to a number/price/legal term
-- High-stakes named-person threads where a wrong word matters
-
-You STILL draft sensitive threads — but the draft must be SAFE: never confirm wire/bank details or payment instructions, never commit to a specific number/price/legal term, never invent facts. When the safe move is to slow down, draft exactly that (e.g. "Let's get on a quick call to nail down the details.", "Send that over and I'll review.", "Want to make sure we're aligned before I commit — let's talk Thursday."). Leave anything uncertain as a clear placeholder like [confirm amount]. For WIRE/MONEY especially: the reply must NOT confirm or repeat any account/routing/payment detail — steer to an out-of-band verbal confirmation.
+REPLY SHAPE (only for "reply"): set reply_kind:
+- "single"   → one natural reply. ONE variant labeled "Reply".
+- "decision" → sender asks yes/no or either/or and Collin could go more than one way. 2-3 variants, ONE per path, each a COMPLETE standalone reply, labeled by the path ("Yes — confirm", "Propose Thursday instead", "Decline"). Genuinely different answers, not rewordings. Never guess which way he leans.
 
 Output STRICT JSON only.`;
 
-function drafterPrompt(threads) {
+function drafterPrompt(threads, learned) {
   const compact = threads.map((t, i) => ({
     i,
     from_name: t.from_name,
@@ -183,17 +185,16 @@ function drafterPrompt(threads) {
     subject: t.subject,
     text: (t.body || t.snippet || "").slice(0, 2000),
   }));
-  return `Inbound threads (last ${SINCE_HOURS}h):\n${JSON.stringify(compact)}\n\n` +
+  return `Inbound threads (last ${SINCE_HOURS}h), all from humans:\n${JSON.stringify(compact)}\n${learned || ""}\n` +
 `For each thread, return STRICT JSON:
 {
  "items":[{
    "i":int,
-   "category":"reply|no-reply-needed",
-   "sensitivity":"normal|sensitive",            // "normal" when category=="no-reply-needed"
-   "sensitive_reason":string|null,              // short why, when sensitive
+   "category":"reply|needs-collin|no-reply-needed",
+   "needs_collin_reason":string|null,           // short why, when category=="needs-collin"
    "reply_kind":"single|decision|null",         // null unless category=="reply"
    "variants":[                                  // 1 for single, 2-3 for decision; [] unless reply
-     {"label":string, "body":string}            // body = full reply in Collin's voice (SAFE if sensitive)
+     {"label":string, "body":string}            // body = full reply in Collin's voice
    ]
  }]
 }
@@ -201,21 +202,17 @@ No prose outside the JSON.`;
 }
 
 // ---------- Pass 2: Sue review (Approval Rules + voice lens) ----------
-const SUE_SYS = `You are Sue, Collin's orchestrator and sign-off gate. You REVIEW prepopulated email reply OPTIONS before they reach Collin's dashboard. Some threads carry several variants (one per answer Collin could give) — judge EACH variant on its own. You do not write them — you judge them. Be strict; when unsure, HOLD that variant.
-
-Every reply-needed thread gets a draft now, including sensitive ones (investor/LP, loan, pricing, partner, money/wire, signature). You do NOT hold a variant just because the thread is sensitive — you hold it only if the DRAFT ITSELF is unsafe or off-voice. Judge the words on the page.
+const SUE_SYS = `You are Sue, Collin's sign-off gate. You REVIEW prepopulated reply OPTIONS before they reach his dashboard. Some threads carry several variants (one per answer he could give) — judge EACH on its own. You judge; you don't write. Be strict; when unsure, HOLD.
 
 Approve a variant only if ALL are true:
-- It does NOT confirm/commit anything it shouldn't: no wire/bank/payment details repeated or confirmed, no specific number/price/legal term committed, no signature implied, no investor/loan facts asserted. On sensitive threads the safe reply slows things down (get on a call, "send it over and I'll review", verify out-of-band) — that is exactly what to APPROVE.
-- It sounds like Collin: direct, no corporate jargon, no marketing language, short paragraphs, no bullet lists, signs "— Collin". No exclamation-point spam.
-- It contains no fabricated facts, dates, figures, or commitments. Unknowns are left as clear placeholders, not guessed.
+- It commits nothing it shouldn't: no wire/bank/payment detail repeated or confirmed, no specific number/price/legal term committed, no signature implied, no investor/loan facts asserted. (Money/wire/signature threads are filtered upstream — if one slips through, HOLD every variant.)
+- It sounds like Collin: direct, no corporate jargon, no marketing language, short paragraphs, no bullet lists, signs "— Collin", no exclamation-point spam.
+- No fabricated facts, dates, figures, or commitments. Unknowns are clear placeholders, not guesses.
 
-If a variant commits to money/price/legal terms, confirms wire/payment details, invents facts, or is off-voice → verdict:"hold" with a one-line note on what Collin should decide or fix. Otherwise verdict:"approve". For WIRE/MONEY threads, hold ANY variant that repeats or confirms a payment/account detail.
+Otherwise verdict:"hold" with a one-line note on what to fix or decide. Output STRICT JSON only.`;
 
-Output STRICT JSON only.`;
-
-function suePrompt(reviewItems) {
-  return `Reply options to review (each thread i has one or more variants v):\n${JSON.stringify(reviewItems)}\n\n` +
+function suePrompt(reviewItems, learned) {
+  return `Reply options to review (each thread i has one or more variants v):\n${JSON.stringify(reviewItems)}\n${learned || ""}\n` +
 `Return STRICT JSON — one verdict per (thread i, variant v):
 { "verdicts":[{"i":int,"v":int,"verdict":"approve|hold","note":string}] }
 No prose outside the JSON.`;
@@ -241,75 +238,135 @@ async function callClaude(system, user) {
 }
 
 async function logRow(row) {
-  if (OPEN_THREADS.has(row.gmail_thread_id)) {
-    console.log("draft-replies: skip dup — open draft already exists for thread", row.gmail_thread_id);
-    return;
-  }
+  if (DRY) return;
   const { error } = await db.from("email_drafts").insert(row);
   if (error) console.error("draft-replies: log error", row.gmail_thread_id, error.message);
-  else OPEN_THREADS.add(row.gmail_thread_id); // guard against same-run dups too
+}
+
+// A minimal ledger row (no draft): records that we processed this message and why
+// we didn't stage a reply, so dedup never reconsiders it and there's an audit trail.
+function ledgerRow(t, status, reason) {
+  return {
+    gmail_thread_id: t.thread_id, gmail_msg_id: t.msg_id,
+    person_name: t.from_name, person_email: t.from_email, subject: t.subject,
+    original_snippet: (t.body || t.snippet || "").slice(0, 1500),
+    reply_to_message_id: t.msg_message_id || null,
+    reply_references: t.references || null,
+    category: status === "no_reply" ? "no-reply-needed" : "reply",
+    reply_kind: "single",
+    sensitivity: status === "excluded" || status === "needs_collin" ? "sensitive" : "normal",
+    excluded_reason: reason || null,
+    variants: [], draft_body: null,
+    sue_verdict: "pending", sue_note: null,
+    status,
+  };
 }
 
 // ---------- main ----------
 async function main() {
   const token = await gmailToken();
-  if (!token) {
-    console.log("draft-replies: Gmail creds absent — nothing to do.");
-    return;
-  }
-  const threads = await fetchInboundThreads(token);
-  if (!threads.length) { console.log("draft-replies: no inbound threads."); return; }
-  await loadOpenThreads();
+  if (!token) { console.log("draft-replies: Gmail creds absent — nothing to do."); return; }
 
-  // Pass 1 — drafter (drafts a reply for EVERY reply-needed thread; flags sensitive)
-  const d = parseJson(await callClaude(DRAFTER_SYS, drafterPrompt(threads)), "drafter");
+  const raw = await fetchInboundThreads(token);
+  if (!raw.length) { console.log("draft-replies: no inbound threads."); return; }
+
+  // 0. FILTER — robots never reach the model.
+  const human = [];
+  let filtered = 0;
+  for (const t of raw) {
+    const r = isReplyableSender(t);
+    if (!r.replyable) { filtered++; if (DRY) console.log(`  filter  ${t.from_email} — ${r.reason}`); continue; }
+    human.push(t);
+  }
+
+  // 0b. DEDUP — message-keyed, status-agnostic.
+  const state = await loadDedupState(db);
+  const candidates = [];
+  let deduped = 0;
+  for (const t of human) {
+    const d = dedupSkip(t, state);
+    if (d.skip) { deduped++; if (DRY) console.log(`  dedup   ${t.from_email} "${t.subject}" — ${d.reason}`); continue; }
+    candidates.push(t);
+  }
+
+  // 0c. HARD NET — money/wire/signature: log excluded, never draft.
+  const draftable = [];
+  let hardExcluded = 0;
+  for (const t of candidates) {
+    const h = isHardExcluded(t);
+    if (h.excluded) {
+      hardExcluded++;
+      if (DRY) console.log(`  EXCLUDE ${t.from_email} "${t.subject}" — ${h.reason}`);
+      else await logRow(ledgerRow(t, "excluded", h.reason));
+      continue;
+    }
+    draftable.push(t);
+  }
+
+  console.log(
+    `draft-replies: ${raw.length} threads → ${filtered} filtered (robot), ` +
+    `${deduped} deduped, ${hardExcluded} hard-excluded, ${draftable.length} to classify.`
+  );
+  if (!draftable.length) { console.log("draft-replies: nothing to draft."); return; }
+
+  // self-learning input
+  const learned = await loadFeedbackMemory(db);
+  if (learned && DRY) console.log("draft-replies: feedback memory loaded.");
+
+  // Pass 1 — drafter (narrow-safe)
+  const d = parseJson(await callClaude(DRAFTER_SYS, drafterPrompt(draftable, learned)), "drafter");
   if (!d?.items) { console.log("draft-replies: drafter returned nothing usable."); return; }
-  // Normalize: each reply item carries variants[]; tolerate a legacy draft_body.
   for (const it of d.items) {
     if (it.category !== "reply") { it.variants = []; continue; }
-    if (!Array.isArray(it.variants) || !it.variants.length) {
-      it.variants = it.draft_body ? [{ label: "Reply", body: it.draft_body }] : [];
-    }
+    if (!Array.isArray(it.variants)) it.variants = [];
     it.variants = it.variants.filter((v) => v && v.body && v.body.trim()).slice(0, 3);
     it.reply_kind = it.variants.length > 1 ? "decision" : "single";
-    it.sensitivity = it.sensitivity === "sensitive" ? "sensitive" : "normal";
   }
   const byIndex = new Map(d.items.map((it) => [it.i, it]));
 
-  // Pass 2 — Sue reviews EVERY variant of every reply-needed thread (verdict per variant)
-  const routine = threads
+  // Pass 2 — Sue reviews every variant of every "reply" thread
+  const routine = draftable
     .map((t, i) => ({ t, i, it: byIndex.get(i) }))
     .filter((x) => x.it?.category === "reply" && x.it.variants.length);
-  let verdicts = new Map(); // key `${i}:${v}` -> {verdict, note}
+  let verdicts = new Map();
   if (routine.length) {
     const reviewItems = routine.map((x) => ({
       i: x.i,
       from: x.t.from_email,
       subject: x.t.subject,
-      sensitivity: x.it.sensitivity,
-      sensitive_reason: x.it.sensitive_reason || null,
       original: (x.t.body || x.t.snippet || "").slice(0, 1200),
       variants: x.it.variants.map((v, vi) => ({ v: vi, label: v.label, draft: v.body })),
     }));
-    const s = parseJson(await callClaude(SUE_SYS, suePrompt(reviewItems)), "sue");
+    const s = parseJson(await callClaude(SUE_SYS, suePrompt(reviewItems, learned)), "sue");
     verdicts = new Map((s?.verdicts || []).map((x) => [`${x.i}:${x.v}`, x]));
   }
 
-  let staged = 0, optionsApproved = 0, held = 0, noReply = 0, sensitive = 0;
-  for (let i = 0; i < threads.length; i++) {
-    const t = threads[i];
+  // 3. STAGE — one ledger row per message; pending/held for "reply", needs_collin / no_reply otherwise.
+  let staged = 0, optionsApproved = 0, held = 0, noReply = 0, needsCollin = 0;
+  for (let i = 0; i < draftable.length; i++) {
+    const t = draftable[i];
     const it = byIndex.get(i);
-    if (!it || it.category === "no-reply-needed") { noReply++; continue; }
-    if (!it.variants.length) { noReply++; continue; } // drafter flagged reply but produced nothing usable
 
-    // attach Sue's per-variant verdict
+    if (!it || it.category === "no-reply-needed") {
+      noReply++;
+      if (DRY) console.log(`  no-reply  ${t.from_email} "${t.subject}"`);
+      else await logRow(ledgerRow(t, "no_reply", null));
+      continue;
+    }
+    if (it.category === "needs-collin" || !it.variants.length) {
+      needsCollin++;
+      const reason = it.needs_collin_reason || "needs Collin's judgment";
+      if (DRY) console.log(`  NEEDS-COLLIN ${t.from_email} "${t.subject}" — ${reason}`);
+      else await logRow(ledgerRow(t, "needs_collin", reason));
+      continue;
+    }
+
     const reviewed = it.variants.map((v, vi) => {
       const verdict = verdicts.get(`${i}:${vi}`);
       const ok = verdict?.verdict === "approve";
       if (ok) optionsApproved++;
       return {
-        label: v.label,
-        body: v.body,
+        label: v.label, body: v.body,
         verdict: ok ? "approve" : "hold",
         note: verdict?.note || (ok ? null : "held by Sue review"),
       };
@@ -317,20 +374,20 @@ async function main() {
     const anyApproved = reviewed.some((v) => v.verdict === "approve");
     const status = anyApproved ? "pending" : "held";
     if (anyApproved) staged++; else held++;
-    if (it.sensitivity === "sensitive") sensitive++;
-
-    // Pick a sensible legacy draft_body (first approved, else first) for back-compat.
     const lead = reviewed.find((v) => v.verdict === "approve") || reviewed[0];
 
+    if (DRY) {
+      console.log(`  ${status.toUpperCase().padEnd(7)} ${t.from_email} "${t.subject}" (${reviewed.length} variant) ${lead?.note ? "— " + lead.note : ""}`);
+      continue;
+    }
     await logRow({
       gmail_thread_id: t.thread_id, gmail_msg_id: t.msg_id,
       person_name: t.from_name, person_email: t.from_email, subject: t.subject,
       original_snippet: (t.body || t.snippet || "").slice(0, 1500),
       reply_to_message_id: t.msg_message_id || null,
       reply_references: t.references || null,
-      category: "reply", reply_kind: it.reply_kind,
-      sensitivity: it.sensitivity,
-      excluded_reason: it.sensitivity === "sensitive" ? (it.sensitive_reason || "sensitive — review carefully") : null,
+      category: "reply", reply_kind: it.reply_kind, sensitivity: "normal",
+      excluded_reason: null,
       variants: reviewed, draft_body: lead?.body || null,
       sue_verdict: anyApproved ? "approve" : "hold",
       sue_note: anyApproved ? null : (reviewed[0]?.note || "all variants held"),
@@ -339,9 +396,8 @@ async function main() {
   }
 
   console.log(
-    `draft-replies: ${staged} thread(s) staged for /replies ` +
-    `(${optionsApproved} reply option(s) Sue-approved, ${sensitive} flagged sensitive), ` +
-    `${held} held, ${noReply} no-reply-needed.`
+    `draft-replies: ${staged} staged for /replies (${optionsApproved} option(s) Sue-approved), ` +
+    `${held} held, ${needsCollin} needs-collin, ${noReply} no-reply.` + (DRY ? " [DRY RUN — nothing written]" : "")
   );
 }
 

@@ -11,6 +11,7 @@
     "intake": "node scripts/intake-cards.mjs",
     "intel": "node scripts/intel.mjs",
     "draft-replies": "node scripts/draft-replies.mjs",
+    "cleanup-drafts": "node scripts/cleanup-drafts.mjs",
     "lls-sync": "node scripts/lls-sync.mjs",
     "lls-report": "node scripts/lls-monthly-report.mjs",
     "pgo-sync": "node scripts/pgo-sync.mjs",

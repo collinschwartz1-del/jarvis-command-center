@@ -10,6 +10,7 @@ import { requireOwner } from "@/lib/auth";
 import { gmailToken, writeGmailDraft, getThreadState } from "@/lib/gmail";
 import { normalizeActionItems } from "@/lib/queries";
 import { actionSignature, isWireItem } from "@/lib/inbox-rules.mjs";
+import { recordDraftFeedback } from "@/lib/draft-control.mjs";
 import type { CardStatus } from "@/lib/types";
 
 // Phase 3 + 4 — write card decisions back to BOTH Supabase and the markdown
@@ -214,6 +215,22 @@ export async function approveReply(
     })
     .eq("id", draftId);
 
+  // Learning signal: did Collin keep the draft as-is, or rewrite it? An edit is
+  // the most valuable signal — draft_body vs edited_body is a correction the next
+  // run learns from. (see scripts/draft-replies.mjs loadFeedbackMemory)
+  const original = (picked?.body ?? row.draft_body ?? "").trim();
+  const wasEdited = !!editedBody && body !== original;
+  await recordDraftFeedback(db, {
+    draft_id: draftId,
+    thread_id: row.gmail_thread_id,
+    person_email: row.person_email,
+    subject: row.subject,
+    draft_body: original,
+    edited_body: wasEdited ? body : null,
+    signal: wasEdited ? "edited" : "approved",
+    reason: wasEdited ? "Collin rewrote before staging" : "staged as-is",
+  });
+
   await db.from("activity").insert({
     actor: "collin",
     kind: "reply_approved",
@@ -231,10 +248,24 @@ export async function dismissReply(draftId: string) {
   const db = supabaseAdmin();
   const { data: row } = await db
     .from("email_drafts")
-    .select("person_name, person_email")
+    .select("person_name, person_email, subject, gmail_thread_id, draft_body")
     .eq("id", draftId)
     .maybeSingle();
   await db.from("email_drafts").update({ status: "dismissed" }).eq("id", draftId);
+
+  // Learning signal: Collin threw this draft away — a negative example the next
+  // run weights against (don't draft this kind again). See draft_feedback.
+  await recordDraftFeedback(db, {
+    draft_id: draftId,
+    thread_id: row?.gmail_thread_id,
+    person_email: row?.person_email,
+    subject: row?.subject,
+    draft_body: row?.draft_body,
+    edited_body: null,
+    signal: "dismissed",
+    reason: "dismissed from /replies",
+  });
+
   await db.from("activity").insert({
     actor: "collin",
     kind: "reply_dismissed",
