@@ -67,6 +67,29 @@ export type CommHit = {
   occurred_at: string | null;
 };
 
+export type ActionItem = {
+  id: string;
+  function: string;
+  title: string;
+  detail: string | null;
+  confidence: number | null;
+  provenance: { urgency?: string; business?: string | null; agent?: string } | null;
+  created_at: string;
+};
+
+// The HITL queue — AI-operator proposals awaiting a human decision.
+export async function getActionQueue(): Promise<ActionItem[]> {
+  const { data } = await brain()
+    .from("action_items")
+    .select("id,function,title,detail,confidence,provenance,created_at")
+    .eq("approval_state", "proposed")
+    .order("created_at", { ascending: false });
+  const rank: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  return ((data ?? []) as ActionItem[]).sort(
+    (a, z) => (rank[a.provenance?.urgency ?? "medium"] ?? 1) - (rank[z.provenance?.urgency ?? "medium"] ?? 1)
+  );
+}
+
 // FTS retrieval used by the "Ask the Brain" route (server-side).
 export async function searchComms(q: string, biz: string | null, lim = 40): Promise<CommHit[]> {
   const { data, error } = await brain().rpc("search_comms", { q, biz: biz ?? null, lim });

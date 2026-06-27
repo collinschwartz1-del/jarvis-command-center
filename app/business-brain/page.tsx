@@ -1,6 +1,7 @@
 import { PageHeader, SectionLabel, Empty } from "@/components/ui";
-import { getBrainStats, getRecentDecisions } from "@/lib/brain-queries";
+import { getBrainStats, getRecentDecisions, getActionQueue } from "@/lib/brain-queries";
 import { AskBrain } from "./ask-brain";
+import { ActionQueue } from "./action-queue";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ const BIZ_COLOR: Record<string, string> = {
 };
 
 export default async function BusinessBrainPage() {
-  const [stats, decisions] = await Promise.all([getBrainStats(), getRecentDecisions(14)]);
+  const [stats, decisions, queue] = await Promise.all([getBrainStats(), getRecentDecisions(14), getActionQueue()]);
   const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—");
 
   return (
@@ -25,6 +26,11 @@ export default async function BusinessBrainPage() {
           stats.latest
         )}). ${stats.principalCount.toLocaleString()} carry deep-extracted principal reasoning. Ask it anything — answers come straight from your own record.`}
       />
+
+      <section>
+        <SectionLabel>Action Queue · AI Operators Propose — You Decide ({queue.length})</SectionLabel>
+        <ActionQueue items={queue} />
+      </section>
 
       <section>
         <SectionLabel>Ask the Brain</SectionLabel>
