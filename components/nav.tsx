@@ -21,6 +21,7 @@ const LINKS = [
   { href: "/bridge", label: "Bridge" },
   { href: "/trends", label: "Trends" },
   { href: "/ask", label: "Ask" },
+  { href: "/business-brain", label: "Brain" },
 ];
 
 export function Nav({ role }: { role?: Role | null }) {
