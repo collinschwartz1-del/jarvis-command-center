@@ -72,6 +72,7 @@ export type ActionItem = {
   function: string;
   title: string;
   detail: string | null;
+  draft_output: string | null;
   confidence: number | null;
   provenance: { urgency?: string; business?: string | null; agent?: string } | null;
   created_at: string;
@@ -81,13 +82,24 @@ export type ActionItem = {
 export async function getActionQueue(): Promise<ActionItem[]> {
   const { data } = await brain()
     .from("action_items")
-    .select("id,function,title,detail,confidence,provenance,created_at")
+    .select("id,function,title,detail,draft_output,confidence,provenance,created_at")
     .eq("approval_state", "proposed")
     .order("created_at", { ascending: false });
   const rank: Record<string, number> = { high: 0, medium: 1, low: 2 };
   return ((data ?? []) as ActionItem[]).sort(
     (a, z) => (rank[a.provenance?.urgency ?? "medium"] ?? 1) - (rank[z.provenance?.urgency ?? "medium"] ?? 1)
   );
+}
+
+// Approved items you're actively working — the queue's "after Approve" destination.
+export async function getWorkingItems(): Promise<ActionItem[]> {
+  const { data } = await brain()
+    .from("action_items")
+    .select("id,function,title,detail,draft_output,confidence,provenance,created_at")
+    .eq("approval_state", "approved")
+    .order("approved_at", { ascending: false })
+    .limit(40);
+  return (data ?? []) as ActionItem[];
 }
 
 // FTS retrieval used by the "Ask the Brain" route (server-side).

@@ -1,7 +1,7 @@
 import { PageHeader, SectionLabel, Empty } from "@/components/ui";
-import { getBrainStats, getRecentDecisions, getActionQueue } from "@/lib/brain-queries";
+import { getBrainStats, getRecentDecisions, getActionQueue, getWorkingItems } from "@/lib/brain-queries";
 import { AskBrain } from "./ask-brain";
-import { ActionQueue } from "./action-queue";
+import { ActionQueue, WorkingList } from "./action-queue";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,12 @@ const BIZ_COLOR: Record<string, string> = {
 };
 
 export default async function BusinessBrainPage() {
-  const [stats, decisions, queue] = await Promise.all([getBrainStats(), getRecentDecisions(14), getActionQueue()]);
+  const [stats, decisions, queue, working] = await Promise.all([
+    getBrainStats(),
+    getRecentDecisions(14),
+    getActionQueue(),
+    getWorkingItems(),
+  ]);
   const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—");
 
   return (
@@ -31,6 +36,13 @@ export default async function BusinessBrainPage() {
         <SectionLabel>Action Queue · AI Operators Propose — You Decide ({queue.length})</SectionLabel>
         <ActionQueue items={queue} />
       </section>
+
+      {working.length > 0 && (
+        <section>
+          <SectionLabel>Working On It · Approved ({working.length})</SectionLabel>
+          <WorkingList items={working} />
+        </section>
+      )}
 
       <section>
         <SectionLabel>Ask the Brain</SectionLabel>
