@@ -36,7 +36,8 @@ export async function POST(req: NextRequest) {
 
   const client = new Anthropic({ apiKey });
   const msg = await client.messages.create({
-    model: "claude-opus-4-8",
+    // Sonnet: ~1/5 the cost of Opus, near-identical quality for grounded Q&A over retrieved emails.
+    model: process.env.BRAIN_ASK_MODEL || "claude-sonnet-4-6",
     max_tokens: 1024,
     system:
       `You answer questions about Collin Schwartz's businesses using ONLY the retrieved emails below, drawn from his Business Brain ` +
