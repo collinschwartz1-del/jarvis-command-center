@@ -1,0 +1,38 @@
+name: LLS Monthly Report
+
+# 1st-of-month LLS report build (Lendr -> Supabase-backed report; best-effort
+# Drive upload). Runs in the cloud so it doesn't depend on Collin's Mac being on.
+# Replaces the local cron (scripts/lls-cron.sh report). The local-only vault write
+# (LLS_VAULT_DIR) simply skips in CI — the report/email is the deliverable.
+#
+# Schedule is UTC (no DST). "30 11 1 * *" = ~6:30am CDT / 5:30am CST on the 1st.
+
+on:
+  schedule:
+    - cron: "30 11 1 * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: lls-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Run LLS monthly report
+        run: node scripts/lls-monthly-report.mjs
+        env:
+          LENDR_API_BASE: ${{ secrets.LENDR_API_BASE }}
+          LENDR_API_KEY: ${{ secrets.LENDR_API_KEY }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
